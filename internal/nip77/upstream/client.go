@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -16,7 +17,8 @@ import (
 )
 
 type wsClient struct {
-	conn *websocket.Conn
+	conn   *websocket.Conn
+	fetchN atomic.Uint64
 }
 
 func dialUpstream(ctx context.Context, rawURL string) (*wsClient, error) {
@@ -99,24 +101,37 @@ func (c *wsClient) readMessage(ctx context.Context, timeout time.Duration) (typ 
 	return typ, raw, nil
 }
 
-func (c *wsClient) reqEventByID(ctx context.Context, id string) (*nostr.Event, error) {
-	subID := "fetch-" + id[:8]
+func (c *wsClient) reqEventByID(ctx context.Context, id string, timeout time.Duration, answerAuth func(string) error) (*nostr.Event, error) {
+	if len(id) < 8 {
+		return nil, fmt.Errorf("invalid fetch id")
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	subID := fmt.Sprintf("f%x", c.fetchN.Add(1))
 	filter := map[string]any{"ids": []string{id}}
 	if err := c.sendJSON([]any{"REQ", subID, filter}); err != nil {
 		return nil, err
 	}
-	deadline, ok := ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(timeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
 	}
 	for time.Now().Before(deadline) {
-		typ, raw, err := c.readMessage(ctx, 30*time.Second)
+		typ, raw, err := c.readMessage(ctx, timeout)
 		if err != nil {
 			return nil, err
 		}
 		switch typ {
+		case "AUTH":
+			if answerAuth == nil {
+				return nil, fmt.Errorf("upstream AUTH challenge during fetch")
+			}
+			if err := answerAuth(jsonStringAt(raw, 1)); err != nil {
+				return nil, err
+			}
 		case "EVENT":
-			if len(raw) < 3 {
+			if len(raw) < 3 || jsonStringAt(raw, 1) != subID {
 				continue
 			}
 			var ev nostr.Event
@@ -128,8 +143,16 @@ func (c *wsClient) reqEventByID(ctx context.Context, id string) (*nostr.Event, e
 				return &ev, nil
 			}
 		case "EOSE":
+			if jsonStringAt(raw, 1) != subID {
+				continue
+			}
 			_ = c.sendJSON([]any{"CLOSE", subID})
 			return nil, fmt.Errorf("event not found: %s", id)
+		case "CLOSED":
+			if jsonStringAt(raw, 1) != subID {
+				continue
+			}
+			return nil, fmt.Errorf("fetch closed: %s", jsonStringAt(raw, 2))
 		}
 	}
 	return nil, context.DeadlineExceeded
