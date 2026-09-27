@@ -75,18 +75,19 @@ func TestReplaceableRevisionOrder(t *testing.T) {
 	}
 	defer st.Close()
 	pk := nostrRepeat("b", 64)
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		kind int
 		tags [][]string
 	}{
-		{kind: 0}, {kind: 30402, tags: [][]string{{"d", "product"}}},
+		{kind: 0}, {kind: 3}, {kind: 10050},
+		{kind: 30078, tags: [][]string{{"d", "app-data"}}},
+		{kind: 30402, tags: [][]string{{"d", "product"}}},
+		{kind: 31989, tags: [][]string{{"d", "handler"}}},
+		{kind: 31990, tags: [][]string{{"d", "handler-info"}}},
 	} {
-		suffix := "0"
-		if tc.kind != 0 {
-			suffix = "1"
-		}
+		suffix := fmt.Sprintf("%02x", i)
 		makeEvent := func(id string, created int64) *nostr.Event {
-			return &nostr.Event{ID: nostrRepeat(id, 63) + suffix, PubKey: pk, CreatedAt: created,
+			return &nostr.Event{ID: nostrRepeat(id, 62) + suffix, PubKey: pk, CreatedAt: created,
 				Kind: tc.kind, Tags: tc.tags, Content: id, Sig: nostrRepeat("f", 128)}
 		}
 		for _, ev := range []*nostr.Event{makeEvent("c", 10), makeEvent("b", 10), makeEvent("a", 9), makeEvent("d", 10)} {
@@ -100,7 +101,7 @@ func TestReplaceableRevisionOrder(t *testing.T) {
 			}
 		}
 		out, err := st.QueryEvents(ctx, []nostr.Filter{{Authors: []string{pk}, Kinds: []int{tc.kind}}})
-		if err != nil || len(out) != 1 || out[0].ID != nostrRepeat("b", 63)+suffix {
+		if err != nil || len(out) != 1 || out[0].ID != nostrRepeat("b", 62)+suffix {
 			t.Fatalf("kind %d winner: %+v err=%v", tc.kind, out, err)
 		}
 	}
