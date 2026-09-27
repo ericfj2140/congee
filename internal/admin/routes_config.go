@@ -52,6 +52,14 @@ func handlePutConfig(cfgPath string, cfgMu *sync.Mutex, st storage.Store, log ze
 
 		cfgMu.Lock()
 
+		if err := config.RequireNIP11UploadFiles(cfgPath, newCfg); err != nil {
+			cfgMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+
 		prev, _ := os.ReadFile(cfgPath)
 		needRestart := configRestartNeeded(prev, newCfg)
 

@@ -150,7 +150,11 @@ func forwardedProto(r *http.Request) string {
 	if i := strings.Index(proto, ","); i >= 0 {
 		proto = proto[:i]
 	}
-	return strings.TrimSpace(proto)
+	proto = strings.ToLower(strings.TrimSpace(proto))
+	if proto != "http" && proto != "https" {
+		return ""
+	}
+	return proto
 }
 
 // AcceptsNostrJSON reports whether the request asks for NIP-11 JSON.

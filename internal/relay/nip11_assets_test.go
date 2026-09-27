@@ -96,6 +96,18 @@ func TestNIP11HostedAssets(t *testing.T) {
 		t.Fatalf("missing upload status %d", missing.Code)
 	}
 
+	over := bytes.Repeat([]byte{0x89}, config.NIP11IconMaxBytes+1)
+	if err := os.WriteFile(filepath.Join(config.NIP11AssetDir(cfgPath), config.NIP11AssetIcon), over, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.NIP11.IconSource = config.NIP11ImageSourceUpload
+	if tooBig := get("/assets/icon"); tooBig.Code != http.StatusNotFound {
+		t.Fatalf("oversized upload status %d", tooBig.Code)
+	}
+	if err := os.Remove(filepath.Join(config.NIP11AssetDir(cfgPath), config.NIP11AssetIcon)); err != nil {
+		t.Fatal(err)
+	}
+
 	cfg.NIP11.IconSource = config.NIP11ImageSourceURL
 	cfg.NIP11.Icon = "https://images.example/icon.png"
 	cfg.NIP11.BannerSource = config.NIP11ImageSourceURL

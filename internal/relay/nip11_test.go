@@ -30,6 +30,10 @@ func TestNIP11OptionalImages(t *testing.T) {
 		}
 		return doc
 	}
+	request.Header.Set("X-Forwarded-Proto", "https://evil.example")
+	if doc := read(); doc["icon"] != "http://example.com/assets/icon" {
+		t.Fatalf("non-http forwarded proto should be ignored: %v", doc["icon"])
+	}
 	request.Header.Set("X-Forwarded-Proto", "https")
 	doc := read()
 	if doc["icon"] != "https://example.com/assets/icon" || doc["banner"] != "https://example.com/assets/banner" {

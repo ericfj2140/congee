@@ -3,6 +3,7 @@ package relay
 import (
 	_ "embed"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 
@@ -35,6 +36,7 @@ func (s *Server) serveNIP11Asset(w http.ResponseWriter, r *http.Request, asset s
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=60")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
@@ -46,7 +48,7 @@ func (s *Server) nip11AssetBytes(asset, source string) ([]byte, string, error) {
 			s.log.Warn().Err(err).Str("asset", asset).Msg("nip11 upload path")
 			return nil, "", err
 		}
-		data, err := os.ReadFile(path)
+		data, err := readNIP11Upload(path, asset)
 		if err != nil {
 			if os.IsNotExist(err) {
 				s.log.Warn().Str("path", path).Str("asset", asset).Msg("nip11 upload file missing")
@@ -66,6 +68,33 @@ func (s *Server) nip11AssetBytes(asset, source string) ([]byte, string, error) {
 		return defaultBannerSVG, "image/svg+xml", nil
 	}
 	return defaultIconSVG, "image/svg+xml", nil
+}
+
+func readNIP11Upload(path, asset string) ([]byte, error) {
+	max, err := config.NIP11UploadMax(asset)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > int64(max) {
+		return nil, errors.New("nip11 upload exceeds size cap")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, int64(max)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > max {
+		return nil, errors.New("nip11 upload exceeds size cap")
+	}
+	return data, nil
 }
 
 // ReadNIP11Preview returns the bytes the relay would serve for a hosted icon or banner.

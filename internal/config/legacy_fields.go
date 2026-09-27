@@ -3,24 +3,34 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"sync"
 
 	"github.com/rs/zerolog"
+)
+
+var (
+	warnNIP11PubkeyOnce sync.Once
+	warnNIP42AuthOnce   sync.Once
 )
 
 func warnLegacyNIP11Pubkey(data []byte) {
 	if !nip11HasKey(data, "pubkey") {
 		return
 	}
-	log := legacyLogger()
-	log.Warn().Msg("nip11.pubkey is ignored; the relay key is now nip-11 self")
+	warnNIP11PubkeyOnce.Do(func() {
+		log := legacyLogger()
+		log.Warn().Msg("nip11.pubkey is ignored; the relay key is now nip-11 self")
+	})
 }
 
 func applyLegacyNIP42RequireAuth(c *Config, data []byte) {
 	if c == nil || !nip42HasKey(data, "send_challenge_on_connect") {
 		return
 	}
-	log := legacyLogger()
-	log.Warn().Msg("nip42.send_challenge_on_connect is ignored; connection-wide auth is now an explicit nip42.require_auth choice")
+	warnNIP42AuthOnce.Do(func() {
+		log := legacyLogger()
+		log.Warn().Msg("nip42.send_challenge_on_connect is ignored; connection-wide auth is now an explicit nip42.require_auth choice")
+	})
 	if c.NIP42.RequireAuth == "" {
 		c.NIP42.RequireAuth = NIP42RequireAuthProtectedKinds
 	}

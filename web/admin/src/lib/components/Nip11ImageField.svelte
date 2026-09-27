@@ -29,9 +29,21 @@
 	const source = $derived(kind === 'icon' ? draft().nip11.icon_source : draft().nip11.banner_source);
 	const external = $derived(kind === 'icon' ? (draft().nip11.icon ?? '') : (draft().nip11.banner ?? ''));
 
-	async function loadHostedPreview(currentKind: 'icon' | 'banner', gen: number): Promise<string> {
-		const res = await adminFetch(`/api/relay-assets/${currentKind}?v=${gen}`);
-		if (!res.ok) throw new Error('Preview is unavailable.');
+	async function loadHostedPreview(
+		currentKind: 'icon' | 'banner',
+		currentSource: Nip11ImageSource,
+		gen: number
+	): Promise<string> {
+		const res = await adminFetch(
+			`/api/relay-assets/${currentKind}?source=${currentSource}&v=${gen}`
+		);
+		if (!res.ok) {
+			throw new Error(
+				currentSource === 'upload'
+					? 'No uploaded image yet. Choose a file to store one.'
+					: 'Preview is unavailable.'
+			);
+		}
 		const blob = await res.blob();
 		return URL.createObjectURL(blob);
 	}
@@ -139,8 +151,8 @@
 			/>
 		{/if}
 	{:else}
-		{#key `${kind}:${previewGen}`}
-			{#await loadHostedPreview(kind, previewGen)}
+		{#key `${kind}:${source}:${previewGen}`}
+			{#await loadHostedPreview(kind, source, previewGen)}
 				<p class="text-xs text-muted-foreground">Loading preview…</p>
 			{:then url}
 				<img

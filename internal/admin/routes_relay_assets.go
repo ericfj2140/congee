@@ -27,7 +27,16 @@ func handleGetRelayAsset(cfgPath, asset string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		data, contentType, err := relay.ReadNIP11Preview(cfgPath, cfg.NIP11, asset)
+		section := cfg.NIP11
+		switch r.URL.Query().Get("source") {
+		case "":
+		case config.NIP11ImageSourceDefault, config.NIP11ImageSourceUpload, config.NIP11ImageSourceURL:
+			section = previewSection(section, asset, r.URL.Query().Get("source"))
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source must be default, upload, or url"})
+			return
+		}
+		data, contentType, err := relay.ReadNIP11Preview(cfgPath, section, asset)
 		if err != nil {
 			if errors.Is(err, relay.ErrNIP11ImageExternal) || os.IsNotExist(err) {
 				http.NotFound(w, r)
@@ -74,6 +83,10 @@ func handlePostRelayAsset(cfgPath string, cfgMu *sync.Mutex, st storage.Store, l
 			return
 		}
 		prevSource := cfg.NIP11.ImageSource(asset)
+		var previous []byte
+		if prevSource == config.NIP11ImageSourceUpload {
+			previous = readPreviousNIP11Asset(cfgPath, asset)
+		}
 		if err := config.WriteNIP11Asset(cfgPath, asset, data); err != nil {
 			log.Warn().Err(err).Str("asset", asset).Msg("nip11 upload write failed")
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "write image failed"})
@@ -81,18 +94,13 @@ func handlePostRelayAsset(cfgPath string, cfgMu *sync.Mutex, st storage.Store, l
 		}
 		setNIP11Upload(cfg, asset)
 		if err := config.WriteConfigAtomic(cfgPath, cfg); err != nil {
-			if prevSource != config.NIP11ImageSourceUpload {
-				if path, pathErr := config.NIP11AssetFile(cfgPath, asset); pathErr == nil {
-					_ = os.Remove(path)
-				}
-			}
+			restoreNIP11Asset(cfgPath, asset, prevSource, previous)
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		diff := "previous_bytes=" + strconv.Itoa(len(prev)) + "\nnip11 " + asset + " source=upload"
 		if err := config.SaveConfigChange(r.Context(), st, "POST /api/relay-assets/"+asset, diff); err != nil {
-			http.Error(w, `{"error":"changelog write failed"}`, http.StatusInternalServerError)
-			return
+			log.Warn().Err(err).Str("asset", asset).Msg("nip11 upload saved but changelog write failed")
 		}
 		needRestart := configRestartNeeded(prev, cfg)
 		if needRestart && scheduleRestart != nil {
@@ -104,6 +112,54 @@ func handlePostRelayAsset(cfgPath string, cfgMu *sync.Mutex, st storage.Store, l
 			"restarting":       needRestart && scheduleRestart != nil,
 		})
 	}
+}
+
+func previewSection(section config.NIP11Section, asset, source string) config.NIP11Section {
+	switch asset {
+	case config.NIP11AssetBanner:
+		section.BannerSource = source
+		if source != config.NIP11ImageSourceURL {
+			section.Banner = ""
+		}
+	default:
+		section.IconSource = source
+		if source != config.NIP11ImageSourceURL {
+			section.Icon = ""
+		}
+	}
+	return section
+}
+
+func readPreviousNIP11Asset(cfgPath, asset string) []byte {
+	path, err := config.NIP11AssetFile(cfgPath, asset)
+	if err != nil {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	max, err := config.NIP11UploadMax(asset)
+	if err != nil || info.Size() <= 0 || info.Size() > int64(max) {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) > max {
+		return nil
+	}
+	return data
+}
+
+func restoreNIP11Asset(cfgPath, asset, prevSource string, previous []byte) {
+	path, err := config.NIP11AssetFile(cfgPath, asset)
+	if err != nil {
+		return
+	}
+	if prevSource == config.NIP11ImageSourceUpload && len(previous) > 0 {
+		_ = config.WriteNIP11Asset(cfgPath, asset, previous)
+		return
+	}
+	_ = os.Remove(path)
 }
 
 func setNIP11Upload(cfg *config.Config, asset string) {
