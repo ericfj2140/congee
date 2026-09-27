@@ -89,6 +89,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("relay server init failed")
 	}
+	srv.SetConfigPath(path)
 	go relay.RunImportedEventFanout(ctx, srv, storeDB, storeDB.EventNotifier, log)
 	if err := nips.LoadEnabled(cfg, srv, storeDB, log); err != nil {
 		log.Fatal().Err(err).Msg("nips load failed")

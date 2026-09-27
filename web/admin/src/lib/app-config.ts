@@ -39,6 +39,8 @@ export type AppConfig = {
 		description: string;
 		banner?: string;
 		icon?: string;
+		icon_source: Nip11ImageSource;
+		banner_source: Nip11ImageSource;
 		admin_pubkey?: string;
 		contact: string;
 		software: string;
@@ -48,7 +50,8 @@ export type AppConfig = {
 	/** NIP-42 client authentication; required fields apply when NIP 42 is enabled. */
 	nip42: {
 		relay_url: string;
-		send_challenge_on_connect: boolean;
+		/** protected_kinds challenges lazily; connect rejects every command until AUTH. */
+		require_auth: Nip42RequireAuth;
 		created_at_skew_seconds: number;
 		require_auth_subscribe_kinds: number[];
 		require_auth_publish_kinds: number[];
@@ -81,6 +84,10 @@ export type AppConfig = {
 	nips: { enabled: number[] };
 };
 
+export type Nip11ImageSource = 'default' | 'upload' | 'url';
+
+export type Nip42RequireAuth = 'protected_kinds' | 'connect';
+
 export type Nip77Upstream = {
 	name: string;
 	url: string;
@@ -107,7 +114,7 @@ export function cloneConfig(c: AppConfig): AppConfig {
 
 const defaultNip42 = (): AppConfig['nip42'] => ({
 	relay_url: '',
-	send_challenge_on_connect: false,
+	require_auth: 'protected_kinds',
 	created_at_skew_seconds: 600,
 	require_auth_subscribe_kinds: [],
 	require_auth_publish_kinds: [],
@@ -138,10 +145,41 @@ const defaultNip77 = (): AppConfig['nip77'] => ({
 	upstreams: []
 });
 
+/** Ensures nip11 image sources exist. A bare URL without a source stays an external URL. */
+export function ensureNip11Draft(cfg: AppConfig): void {
+	cfg.nip11 ??= {
+		name: '',
+		description: '',
+		contact: '',
+		software: '',
+		icon_source: 'default',
+		banner_source: 'default'
+	};
+	const n = cfg.nip11;
+	n.icon_source = imageSource(n.icon_source, n.icon);
+	n.banner_source = imageSource(n.banner_source, n.banner);
+	if (n.icon_source !== 'url') n.icon = '';
+	if (n.banner_source !== 'url') n.banner = '';
+	n.contact ??= '';
+	n.admin_pubkey ??= '';
+}
+
+function imageSource(source: unknown, url: unknown): Nip11ImageSource {
+	if (source === 'default' || source === 'upload' || source === 'url') return source;
+	if (typeof url === 'string' && url.trim() !== '') return 'url';
+	return 'default';
+}
+
 /** Ensures nip42 exists for older config files and the config form. */
 export function ensureNip42Draft(cfg: AppConfig): void {
-	cfg.nip42 ??= defaultNip42();
-	const n = cfg.nip42;
+	const incoming = cfg.nip42 as (AppConfig['nip42'] & { send_challenge_on_connect?: boolean }) | undefined;
+	cfg.nip42 = incoming ?? defaultNip42();
+	const n = cfg.nip42 as AppConfig['nip42'] & { send_challenge_on_connect?: boolean };
+	// The old bool only sent a challenge. It does not become connect mode.
+	if (n.require_auth !== 'protected_kinds' && n.require_auth !== 'connect') {
+		n.require_auth = 'protected_kinds';
+	}
+	delete n.send_challenge_on_connect;
 	// Go JSON encodes nil slices as null; the admin form expects arrays.
 	if (!Array.isArray(n.require_auth_subscribe_kinds)) {
 		n.require_auth_subscribe_kinds = [];
@@ -228,6 +266,7 @@ export function parseConfigJson(text: string): AppConfig {
 		delete n11.version;
 	}
 	const cfg = v as AppConfig;
+	ensureNip11Draft(cfg);
 	ensureNip42Draft(cfg);
 	ensureNip29Draft(cfg);
 	ensureNip17Draft(cfg);

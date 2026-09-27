@@ -37,6 +37,7 @@ type nip11Limitation struct {
 	MaxMessageLength int  `json:"max_message_length"`
 	MaxSubscriptions int  `json:"max_subscriptions"`
 	MaxSubIDLength   int  `json:"max_subid_length"`
+	MaxFilters       int  `json:"max_filters"`
 	DefaultLimit     *int `json:"default_limit,omitempty"`
 	AuthRequired     bool `json:"auth_required"`
 }
@@ -86,11 +87,11 @@ func (h *NIP11Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	doc := nip11Doc{
 		Name:          h.Cfg.NIP11.Name,
 		Description:   h.Cfg.NIP11.Description,
-		Banner:        h.Cfg.NIP11.Banner,
-		Icon:          h.Cfg.NIP11.Icon,
+		Banner:        nip11ImageURL(r, h.Cfg.NIP11, config.NIP11AssetBanner),
+		Icon:          nip11ImageURL(r, h.Cfg.NIP11, config.NIP11AssetIcon),
 		PubKey:        h.Cfg.NIP11.AdminPubKey,
 		Self:          self,
-		Contact:       h.Cfg.NIP11.Contact,
+		Contact:       strings.TrimSpace(h.Cfg.NIP11.Contact),
 		SupportedNIPs: supported,
 		Software:      h.Cfg.NIP11.Software,
 		Version:       version.Version,
@@ -98,8 +99,9 @@ func (h *NIP11Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			MaxMessageLength: h.Cfg.WebSocket.MaxMessageBytes,
 			MaxSubscriptions: h.Cfg.ConnectionLimits.MaxSubscriptionsPerConnection,
 			MaxSubIDLength:   h.Cfg.MaxSubscriptionIDLength,
+			MaxFilters:       h.Cfg.ConnectionLimits.MaxFiltersPerReq,
 			DefaultLimit:     defaultLimit,
-			AuthRequired:     false,
+			AuthRequired:     config.NIP11AuthRequired(h.Cfg),
 		},
 	}
 	w.Header().Set("Content-Type", "application/nostr+json; charset=utf-8")
@@ -107,6 +109,48 @@ func (h *NIP11Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(doc)
+}
+
+func nip11ImageURL(r *http.Request, section config.NIP11Section, asset string) string {
+	if section.ImageSource(asset) == config.NIP11ImageSourceURL {
+		if asset == config.NIP11AssetBanner {
+			return strings.TrimSpace(section.Banner)
+		}
+		return strings.TrimSpace(section.Icon)
+	}
+	path := "/assets/icon"
+	if asset == config.NIP11AssetBanner {
+		path = "/assets/banner"
+	}
+	return nip11AbsoluteURL(r, path)
+}
+
+func nip11AbsoluteURL(r *http.Request, path string) string {
+	return requestScheme(r) + "://" + r.Host + path
+}
+
+func requestScheme(r *http.Request) string {
+	if proto := forwardedProto(r); proto != "" {
+		return proto
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	if r.URL != nil && r.URL.Scheme != "" {
+		return r.URL.Scheme
+	}
+	return "http"
+}
+
+func forwardedProto(r *http.Request) string {
+	proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto"))
+	if proto == "" {
+		return ""
+	}
+	if i := strings.Index(proto, ","); i >= 0 {
+		proto = proto[:i]
+	}
+	return strings.TrimSpace(proto)
 }
 
 // AcceptsNostrJSON reports whether the request asks for NIP-11 JSON.

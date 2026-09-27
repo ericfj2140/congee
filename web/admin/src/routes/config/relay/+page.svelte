@@ -8,12 +8,23 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import Nip11ImageField from '$lib/components/Nip11ImageField.svelte';
 
 	const ctx = getAdminConfig();
 
 	function draft() {
 		return ctx.draft!;
 	}
+
+	const nip11Auth = $derived.by(() => {
+		const mode = draft().nip42.require_auth;
+		const enabled = draft().nips.enabled.includes(42);
+		return {
+			mode,
+			enabled,
+			authRequired: enabled && mode === 'connect'
+		};
+	});
 </script>
 
 <section class="space-y-4">
@@ -47,32 +58,8 @@
 					}}
 				/>
 			</div>
-			<div class="space-y-2">
-				<Label for="n11-icon">Icon URL</Label>
-				<Input
-					id="n11-icon"
-					type="url"
-					value={draft().nip11.icon ?? ''}
-					oninput={(e) => {
-						draft().nip11.icon = e.currentTarget.value;
-						ctx.markDirty();
-					}}
-				/>
-				<p class="text-xs text-muted-foreground">Optional square image shown in compact relay lists.</p>
-			</div>
-			<div class="space-y-2">
-				<Label for="n11-banner">Banner URL</Label>
-				<Input
-					id="n11-banner"
-					type="url"
-					value={draft().nip11.banner ?? ''}
-					oninput={(e) => {
-						draft().nip11.banner = e.currentTarget.value;
-						ctx.markDirty();
-					}}
-				/>
-				<p class="text-xs text-muted-foreground">Optional wide image for the relay’s information page.</p>
-			</div>
+			<Nip11ImageField kind="icon" />
+			<Nip11ImageField kind="banner" />
 			<div class="md:col-span-2 space-y-4 rounded-lg border border-border bg-muted/20 px-4 py-4">
 				<div>
 					<p class="text-sm font-medium">Relay identity (NIP-11 self)</p>
@@ -182,11 +169,12 @@
 					<Label for="n11-cors" class="text-sm font-medium">NIP-11 CORS (any origin)</Label>
 					<p class="text-xs text-muted-foreground">
 						Sets <code class="rounded bg-muted px-1 text-[0.7rem]">Access-Control-Allow-Origin: *</code> on
-						NIP-11 JSON only (GET / with <code class="rounded bg-muted px-1 text-[0.7rem]">Accept:
+						NIP-11 JSON (GET / with <code class="rounded bg-muted px-1 text-[0.7rem]">Accept:
 							application/nostr+json</code>), plus OPTIONS preflight. Also sends
 						<code class="rounded bg-muted px-1 text-[0.7rem]">Access-Control-Allow-Private-Network: true</code> so
 						public sites (e.g. relay checkers) can reach relays on Tailscale or private IPs (Chrome Private
-						Network Access). WebSocket and other responses are unchanged.
+						Network Access). Hosted icon and banner responses get the same CORS headers. WebSocket responses
+						are unchanged.
 					</p>
 				</div>
 				<Switch
@@ -197,6 +185,20 @@
 						ctx.markDirty();
 					}}
 				/>
+			</div>
+			<div class="space-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3 md:col-span-2">
+				<p class="text-sm font-medium">NIP-11 auth_required</p>
+				<p class="font-mono text-sm">{nip11Auth.authRequired ? 'true' : 'false'}</p>
+				<p class="text-xs text-muted-foreground">
+					Read-only value from the current draft. Require AUTH is
+					{nip11Auth.mode === 'connect' ? 'connect' : 'protected kinds'}.
+					{#if nip11Auth.enabled}
+						NIP-42 is enabled.
+					{:else}
+						NIP-42 is disabled, so auth_required stays false.
+					{/if}
+					Change the mode under Security.
+				</p>
 			</div>
 		</Card.Content>
 	</Card.Root>

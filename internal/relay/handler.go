@@ -326,6 +326,12 @@ func (c *Conn) dispatchPayload(payload []byte) {
 			return
 		}
 	}
+	if nip42ConnectGate(c) {
+		if _, ok := msg.(*nostr.AuthMessage); !ok {
+			c.rejectUntilConnectAuth(msg)
+			return
+		}
+	}
 	if c.server.plugins != nil {
 		c.server.plugins.Observe(msg)
 	}
