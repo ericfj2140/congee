@@ -8,7 +8,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 // CurrentSchemaVersion is the PRAGMA user_version / app-expected value for this binary.
 func CurrentSchemaVersion() int { return schemaVersion }
@@ -70,6 +70,11 @@ func runMigrations(ctx context.Context, db *bun.DB, engine string, log zerolog.L
 		case 6:
 			log.Debug().Msg("schema: migrating v6 to v7")
 			if err := migrateV6ToV7(ctx, db, engine, log); err != nil {
+				return err
+			}
+		case 7:
+			log.Debug().Msg("schema: migrating v7 to v8")
+			if err := migrateV7ToV8(ctx, db, engine, log); err != nil {
 				return err
 			}
 		default:
@@ -249,11 +254,61 @@ func migrateV6ToV7(ctx context.Context, db *bun.DB, engine string, log zerolog.L
 			return fmt.Errorf("%s: migrate v6->v7: %w", engine, err)
 		}
 	}
-	log.Debug().Int("schema_version", schemaVersion).Msg("schema v6->v7: set user_version")
-	if _, err := db.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+	log.Debug().Msg("schema v6->v7: set user_version 7")
+	if _, err := db.ExecContext(ctx, `PRAGMA user_version = 7`); err != nil {
 		return fmt.Errorf("%s: set user_version: %w", engine, err)
 	}
 	return nil
+}
+
+// FTS5 cannot index its UNINDEXED event_id column. Keeping the existing FTS
+// index and mapping each signed event ID to its FTS rowid makes replacement and
+// deletion point lookups rather than scans of the full search corpus.
+func migrateV7ToV8(ctx context.Context, db *bun.DB, engine string, log zerolog.Logger) error {
+	var eventsExists int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'events'`).Scan(&eventsExists); err != nil {
+		return fmt.Errorf("%s: inspect events table: %w", engine, err)
+	}
+	if eventsExists == 0 {
+		// Legacy metadata-only files can carry a v7 marker without an event
+		// schema. Establish the fresh v8 event tables in that case.
+		return migrateFresh(ctx, db, engine, log)
+	}
+	return db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var ftsExists int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'event_fts'`).Scan(&ftsExists); err != nil {
+			return fmt.Errorf("%s: inspect FTS table: %w", engine, err)
+		}
+		if ftsExists == 0 {
+			if _, err := tx.ExecContext(ctx, `CREATE VIRTUAL TABLE event_fts USING fts5(
+				event_id UNINDEXED, content, tokenize = 'porter unicode61')`); err != nil {
+				return fmt.Errorf("%s: create missing FTS table: %w", engine, err)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO event_fts(event_id, content) SELECT id, content FROM events`); err != nil {
+				return fmt.Errorf("%s: backfill missing FTS table: %w", engine, err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS event_fts_rowids (
+			event_id TEXT NOT NULL PRIMARY KEY,
+			fts_rowid INTEGER NOT NULL UNIQUE
+		)`); err != nil {
+			return fmt.Errorf("%s: create FTS rowid map: %w", engine, err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM event_fts_rowids`); err != nil {
+			return fmt.Errorf("%s: reset FTS rowid map: %w", engine, err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO event_fts_rowids(event_id, fts_rowid)
+			SELECT event_id, rowid FROM event_fts`); err != nil {
+			return fmt.Errorf("%s: backfill FTS rowid map: %w", engine, err)
+		}
+		if err := createFTS5Triggers(ctx, tx, engine, log); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `PRAGMA user_version = 8`); err != nil {
+			return fmt.Errorf("%s: set user_version: %w", engine, err)
+		}
+		return nil
+	})
 }
 
 func createFTS5AndTriggers(ctx context.Context, db *bun.DB, engine string, log zerolog.Logger) error {
@@ -263,24 +318,44 @@ func createFTS5AndTriggers(ctx context.Context, db *bun.DB, engine string, log z
 			content,
 			tokenize = 'porter unicode61'
 		)`,
+		`CREATE TABLE IF NOT EXISTS event_fts_rowids (
+			event_id TEXT NOT NULL PRIMARY KEY,
+			fts_rowid INTEGER NOT NULL UNIQUE
+		)`,
+	}
+	for i := range fts {
+		log.Debug().Int("fts_step", i).Msg("schema: fts5 ddl")
+		if _, err := db.ExecContext(ctx, fts[i]); err != nil {
+			return fmt.Errorf("%s: fts5: %w", engine, err)
+		}
+	}
+	return createFTS5Triggers(ctx, db, engine, log)
+}
+
+func createFTS5Triggers(ctx context.Context, db bun.IDB, engine string, log zerolog.Logger) error {
+	fts := []string{
 		`DROP TRIGGER IF EXISTS events_ai_fts`,
 		`CREATE TRIGGER events_ai_fts AFTER INSERT ON events BEGIN
 			INSERT INTO event_fts(event_id, content) VALUES (new.id, new.content);
+			INSERT INTO event_fts_rowids(event_id, fts_rowid) VALUES (new.id, last_insert_rowid());
 		END`,
 		`DROP TRIGGER IF EXISTS events_au_fts`,
 		`CREATE TRIGGER events_au_fts AFTER UPDATE ON events BEGIN
-			DELETE FROM event_fts WHERE event_id = old.id;
+			DELETE FROM event_fts WHERE rowid = (SELECT fts_rowid FROM event_fts_rowids WHERE event_id = old.id);
+			DELETE FROM event_fts_rowids WHERE event_id = old.id;
 			INSERT INTO event_fts(event_id, content) VALUES (new.id, new.content);
+			INSERT INTO event_fts_rowids(event_id, fts_rowid) VALUES (new.id, last_insert_rowid());
 		END`,
 		`DROP TRIGGER IF EXISTS events_ad_fts`,
 		`CREATE TRIGGER events_ad_fts AFTER DELETE ON events BEGIN
-			DELETE FROM event_fts WHERE event_id = old.id;
+			DELETE FROM event_fts WHERE rowid = (SELECT fts_rowid FROM event_fts_rowids WHERE event_id = old.id);
+			DELETE FROM event_fts_rowids WHERE event_id = old.id;
 		END`,
 	}
 	for i := range fts {
-		log.Debug().Int("fts_step", i).Msg("schema: fts5/trigger ddl")
+		log.Debug().Int("fts_step", i).Msg("schema: fts5 trigger ddl")
 		if _, err := db.ExecContext(ctx, fts[i]); err != nil {
-			return fmt.Errorf("%s: fts5: %w", engine, err)
+			return fmt.Errorf("%s: fts5 trigger: %w", engine, err)
 		}
 	}
 	return nil

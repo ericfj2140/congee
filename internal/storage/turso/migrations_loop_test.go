@@ -3,8 +3,10 @@ package turso
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/michmich112/congee/internal/nostr"
 	"github.com/michmich112/congee/internal/storage/sqlitewriter"
 	"github.com/rs/zerolog"
 )
@@ -23,7 +25,77 @@ func execOnLibsqlFile(t *testing.T, ctx context.Context, path string, stmts []st
 	}
 }
 
-// TestRunMigrationsLoopsV6ToV7 builds a v7 file, re-adds ws_connection_sessions with user_version 6, and checks Open drops meta tables.
+func TestV7FTSRowidMapUpgradePreservesSearchAndFastDeletion(t *testing.T) {
+	skipNoDriver(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "v7.db")
+	st, err := Open(ctx, path, nil, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := strings.Repeat("b", 64)
+	old := &nostr.Event{ID: strings.Repeat("a", 64), PubKey: pk, CreatedAt: 1, Kind: 3, Content: "oldkeyword", Sig: strings.Repeat("c", 128)}
+	if err := st.SaveEvent(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Model the on-disk v7 schema without changing or rebuilding its FTS rows.
+	execOnLibsqlFile(t, ctx, path, []string{
+		`DROP TRIGGER events_ai_fts`, `DROP TRIGGER events_au_fts`, `DROP TRIGGER events_ad_fts`,
+		`DROP TABLE event_fts_rowids`,
+		`CREATE TRIGGER events_ai_fts AFTER INSERT ON events BEGIN
+			INSERT INTO event_fts(event_id, content) VALUES(new.id, new.content); END`,
+		`CREATE TRIGGER events_ad_fts AFTER DELETE ON events BEGIN
+			DELETE FROM event_fts WHERE event_id = old.id; END`,
+		`PRAGMA user_version = 7`,
+	})
+	st, err = Open(ctx, path, nil, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var mapped, actual int64
+	if err := st.DB().QueryRowContext(ctx, `SELECT m.fts_rowid, f.rowid FROM event_fts_rowids m
+		JOIN event_fts f ON f.rowid = m.fts_rowid WHERE m.event_id = ?`, old.ID).Scan(&mapped, &actual); err != nil || mapped != actual {
+		t.Fatalf("v7 FTS row lost mapping: mapped=%d actual=%d err=%v", mapped, actual, err)
+	}
+	newer := &nostr.Event{ID: strings.Repeat("d", 64), PubKey: pk, CreatedAt: 2, Kind: 3, Content: "newkeyword", Sig: strings.Repeat("c", 128)}
+	if err := st.SaveEvent(ctx, newer); err != nil {
+		t.Fatal(err)
+	}
+	var oldRows, newRows int
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_fts WHERE event_id = ?`, old.ID).Scan(&oldRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_fts WHERE event_id = ?`, newer.ID).Scan(&newRows); err != nil {
+		t.Fatal(err)
+	}
+	if oldRows != 0 || newRows != 1 {
+		t.Fatalf("FTS replacement rows old=%d new=%d", oldRows, newRows)
+	}
+	oldSearch, err := st.SearchEvents(ctx, "oldkeyword", nostr.Filter{Kinds: []int{3}})
+	if err != nil || len(oldSearch) != 0 {
+		t.Fatalf("old revision remains searchable: count=%d err=%v", len(oldSearch), err)
+	}
+	newSearch, err := st.SearchEvents(ctx, "newkeyword", nostr.Filter{Kinds: []int{3}})
+	if err != nil || len(newSearch) != 1 || newSearch[0].ID != newer.ID {
+		t.Fatalf("new revision missing from search: count=%d err=%v", len(newSearch), err)
+	}
+	if err := st.DB().QueryRowContext(ctx, `SELECT m.fts_rowid, f.rowid FROM event_fts_rowids m
+		JOIN event_fts f ON f.rowid = m.fts_rowid WHERE m.event_id = ?`, newer.ID).Scan(&mapped, &actual); err != nil || mapped != actual {
+		t.Fatalf("new FTS row lacks mapping: mapped=%d actual=%d err=%v", mapped, actual, err)
+	}
+	if err := st.DeleteEvent(ctx, newer.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM event_fts`).Scan(&newRows); err != nil || newRows != 0 {
+		t.Fatalf("FTS deletion failed: rows=%d err=%v", newRows, err)
+	}
+}
+
+// TestRunMigrationsLoopsV6ToV7 builds a current file, re-adds ws_connection_sessions with user_version 6, and checks Open drops meta tables.
 func TestRunMigrationsLoopsV6ToV7(t *testing.T) {
 	skipNoDriver(t)
 	ctx := context.Background()
@@ -84,7 +156,7 @@ func TestRunMigrationsLoopsV6ToV7(t *testing.T) {
 	}
 }
 
-// TestRunMigrationsLoopsFakeV5ToV7 keeps a v7 events schema but sets user_version to 5 with legacy meta tables present.
+// TestRunMigrationsLoopsFakeV5ToV7 keeps a current events schema but sets user_version to 5 with legacy meta tables present.
 func TestRunMigrationsLoopsFakeV5ToV7(t *testing.T) {
 	skipNoDriver(t)
 	ctx := context.Background()
