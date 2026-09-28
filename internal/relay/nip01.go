@@ -129,7 +129,7 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 	if s.metrics != nil {
 		s.metrics.IncReq()
 	}
-	if subscribeAuthRequired(s.cfg, msg.Filters) && !c.nip42HasAnyAuth() {
+	if (subscribeAuthRequired(s.cfg, msg.Filters) || nip17InboxAuthRequired(s.cfg, msg.Filters)) && !c.nip42HasAnyAuth() {
 		_ = nip42EnqueueAuthChallenge(c, s.cfg)
 		return c.sendClosed(msg.SubID, "auth-required: subscription requires authentication")
 	}

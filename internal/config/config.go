@@ -59,9 +59,6 @@ func DefaultConfig() *Config {
 			Software:           "https://github.com/michmich112/congee",
 			CORSAllowAnyOrigin: false,
 		},
-		NIP42: NIP42Section{
-			RequireAuth: NIP42RequireAuthProtectedKinds,
-		},
 		NIPs:    NIPsSection{Enabled: []int{1, 11}},
 		Plugins: PluginsSection{InterceptTimeoutMs: DefaultPluginInterceptTimeoutMs},
 		NIP17: NIP17Section{
@@ -212,9 +209,6 @@ func (c *Config) Validate() error {
 	if err := c.normalizeNIP11Identity(); err != nil {
 		return err
 	}
-	if err := c.normalizeNIP42RequireAuth(); err != nil {
-		return err
-	}
 	if len(c.NIPs.Enabled) == 0 {
 		return errors.New("config: nips.enabled must be non-empty")
 	}
@@ -340,19 +334,6 @@ func normalizeNIP11Image(source, raw *string, field string) error {
 		return fmt.Errorf("config: %s_source must be default, upload, or url", field)
 	}
 	return nil
-}
-
-func (c *Config) normalizeNIP42RequireAuth() error {
-	c.NIP42.RequireAuth = strings.TrimSpace(c.NIP42.RequireAuth)
-	if c.NIP42.RequireAuth == "" {
-		c.NIP42.RequireAuth = NIP42RequireAuthProtectedKinds
-	}
-	switch c.NIP42.RequireAuth {
-	case NIP42RequireAuthProtectedKinds, NIP42RequireAuthConnect:
-		return nil
-	default:
-		return fmt.Errorf("config: nip42.require_auth must be %q or %q", NIP42RequireAuthProtectedKinds, NIP42RequireAuthConnect)
-	}
 }
 
 func ptrInt(v int) *int {

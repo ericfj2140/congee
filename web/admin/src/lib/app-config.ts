@@ -50,8 +50,8 @@ export type AppConfig = {
 	/** NIP-42 client authentication; required fields apply when NIP 42 is enabled. */
 	nip42: {
 		relay_url: string;
-		/** protected_kinds challenges lazily; connect rejects every command until AUTH. */
-		require_auth: Nip42RequireAuth;
+		/** Sends an optional challenge; never blocks ordinary requests. */
+		send_challenge_on_connect: boolean;
 		created_at_skew_seconds: number;
 		require_auth_subscribe_kinds: number[];
 		require_auth_publish_kinds: number[];
@@ -86,8 +86,6 @@ export type AppConfig = {
 
 export type Nip11ImageSource = 'default' | 'upload' | 'url';
 
-export type Nip42RequireAuth = 'protected_kinds' | 'connect';
-
 export type Nip77Upstream = {
 	name: string;
 	url: string;
@@ -114,7 +112,7 @@ export function cloneConfig(c: AppConfig): AppConfig {
 
 const defaultNip42 = (): AppConfig['nip42'] => ({
 	relay_url: '',
-	require_auth: 'protected_kinds',
+	send_challenge_on_connect: false,
 	created_at_skew_seconds: 600,
 	require_auth_subscribe_kinds: [],
 	require_auth_publish_kinds: [],
@@ -172,14 +170,12 @@ function imageSource(source: unknown, url: unknown): Nip11ImageSource {
 
 /** Ensures nip42 exists for older config files and the config form. */
 export function ensureNip42Draft(cfg: AppConfig): void {
-	const incoming = cfg.nip42 as (AppConfig['nip42'] & { send_challenge_on_connect?: boolean }) | undefined;
-	cfg.nip42 = incoming ?? defaultNip42();
-	const n = cfg.nip42 as AppConfig['nip42'] & { send_challenge_on_connect?: boolean };
-	// The old bool only sent a challenge. It does not become connect mode.
-	if (n.require_auth !== 'protected_kinds' && n.require_auth !== 'connect') {
-		n.require_auth = 'protected_kinds';
+	cfg.nip42 ??= defaultNip42();
+	const n = cfg.nip42 as AppConfig['nip42'] & { require_auth?: string };
+	if (typeof n.send_challenge_on_connect !== 'boolean') {
+		n.send_challenge_on_connect = n.require_auth === 'connect';
 	}
-	delete n.send_challenge_on_connect;
+	delete n.require_auth;
 	// Go JSON encodes nil slices as null; the admin form expects arrays.
 	if (!Array.isArray(n.require_auth_subscribe_kinds)) {
 		n.require_auth_subscribe_kinds = [];

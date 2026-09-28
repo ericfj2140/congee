@@ -101,7 +101,7 @@ func (h *NIP11Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			MaxSubIDLength:   h.Cfg.MaxSubscriptionIDLength,
 			MaxFilters:       h.Cfg.ConnectionLimits.MaxFiltersPerReq,
 			DefaultLimit:     defaultLimit,
-			AuthRequired:     config.NIP11AuthRequired(h.Cfg),
+			AuthRequired:     false,
 		},
 	}
 	w.Header().Set("Content-Type", "application/nostr+json; charset=utf-8")

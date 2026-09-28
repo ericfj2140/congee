@@ -21,6 +21,20 @@ func nip17Enabled(cfg *config.Config) bool {
 	return cfg != nil && slices.Contains(cfg.NIPs.Enabled, 17)
 }
 
+// Challenge explicit inbox reads even when the operator has not populated the
+// generic protected-kind list. Mixed/public filters keep their query-first path.
+func nip17InboxAuthRequired(cfg *config.Config, filters []nostr.Filter) bool {
+	if !nip17Enabled(cfg) || len(filters) == 0 {
+		return false
+	}
+	for _, f := range filters {
+		if len(f.Kinds) != 1 || f.Kinds[0] != nip17KindGiftWrap {
+			return false
+		}
+	}
+	return true
+}
+
 // RegisterNIP17 registers NIP-17 policy (always) and full gift-wrap handling when NIP-17 is in nips.enabled.
 func RegisterNIP17(s *Server, _ storage.Store) {
 	s.AppendValidator(EventValidatorFunc(func(ctx context.Context, conn *Conn, ev *nostr.Event) error {

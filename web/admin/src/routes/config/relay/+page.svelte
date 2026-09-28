@@ -16,10 +16,6 @@
 	function draft() {
 		return ctx.draft!;
 	}
-
-	const authRequired = $derived(
-		draft().nips.enabled.includes(42) && draft().nip42.require_auth === 'connect'
-	);
 </script>
 
 <section class="space-y-4">
@@ -186,9 +182,10 @@
 			>
 				<p class="text-sm">
 					<span class="font-medium">Auth Required</span>:
-					<span class="font-mono">{authRequired ? 'True' : 'False'}</span>
+					<span class="font-mono">False</span>
+					<span class="mt-1 block text-xs text-muted-foreground">Public requests stay open. With NIP-17 enabled, private messages are served only to authenticated recipients.</span>
 				</p>
-				<Button href="/config/security#require-auth-on" variant="outline" size="sm">
+				<Button href="/config/security#nip42-chal" variant="outline" size="sm">
 					Configure here
 				</Button>
 			</div>

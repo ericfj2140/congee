@@ -425,7 +425,7 @@ func (s *Server) serveWS(nc net.Conn, r *http.Request, resolvedPeerIP string, us
 	})
 
 	go c.writeLoop()
-	if config.NIP11AuthRequired(s.cfg) {
+	if relayNIP42Enabled(s.cfg) && s.cfg.NIP42.SendChallengeOnConnect {
 		_ = nip42EnqueueAuthChallenge(c, s.cfg)
 	}
 	if useFlate {

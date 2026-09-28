@@ -23,17 +23,25 @@ func warnLegacyNIP11Pubkey(data []byte) {
 	})
 }
 
+// Accept configs saved by the initial PR without retaining a connection-wide gate.
+// The legacy bool takes precedence; connect now means an optional challenge only.
 func applyLegacyNIP42RequireAuth(c *Config, data []byte) {
-	if c == nil || !nip42HasKey(data, "send_challenge_on_connect") {
+	if c == nil || nip42HasKey(data, "send_challenge_on_connect") {
 		return
 	}
+	section, ok := rawSection(data, "nip42")
+	if !ok {
+		return
+	}
+	var mode string
+	if json.Unmarshal(section["require_auth"], &mode) != nil {
+		return
+	}
+	c.NIP42.SendChallengeOnConnect = mode == "connect"
 	warnNIP42AuthOnce.Do(func() {
 		log := legacyLogger()
-		log.Warn().Msg("nip42.send_challenge_on_connect is ignored; connection-wide auth is now an explicit nip42.require_auth choice")
+		log.Warn().Msg("nip42.require_auth is replaced by send_challenge_on_connect; public requests remain open")
 	})
-	if c.NIP42.RequireAuth == "" {
-		c.NIP42.RequireAuth = NIP42RequireAuthProtectedKinds
-	}
 }
 
 func nip11HasKey(data []byte, key string) bool {

@@ -129,45 +129,47 @@ func TestNIP11ImageSourceValidation(t *testing.T) {
 	}
 }
 
-func TestLegacySendChallengeOnConnectLoadsAsProtectedKinds(t *testing.T) {
-	base, err := json.Marshal(DefaultConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(base, &raw); err != nil {
-		t.Fatal(err)
-	}
-	nip42 := raw["nip42"].(map[string]any)
-	delete(nip42, "require_auth")
-	nip42["send_challenge_on_connect"] = true
-	legacyJSON, err := json.Marshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, legacyJSON, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadJSON(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.NIP42.RequireAuth != NIP42RequireAuthProtectedKinds {
-		t.Fatalf("require_auth: %q", cfg.NIP42.RequireAuth)
-	}
-	if err := WriteConfigAtomic(path, cfg); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(saved), "send_challenge_on_connect") {
-		t.Fatal("legacy challenge flag survived config save")
-	}
-	if !strings.Contains(string(saved), `"require_auth": "protected_kinds"`) {
-		t.Fatalf("saved config: %s", saved)
+func TestChallengeConfigPreservesPublicAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		section       map[string]any
+		wantChallenge bool
+	}{
+		{"legacy false", map[string]any{"send_challenge_on_connect": false}, false},
+		{"legacy true", map[string]any{"send_challenge_on_connect": true}, true},
+		{"draft protected kinds", map[string]any{"require_auth": "protected_kinds"}, false},
+		{"draft connect", map[string]any{"require_auth": "connect"}, true},
+		{"explicit bool wins", map[string]any{"require_auth": "connect", "send_challenge_on_connect": false}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base, err := json.Marshal(DefaultConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw map[string]any
+			if err := json.Unmarshal(base, &raw); err != nil {
+				t.Fatal(err)
+			}
+			raw["nip42"] = tc.section
+			data, err := json.Marshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := ParseConfigJSON(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.NIP42.SendChallengeOnConnect != tc.wantChallenge {
+				t.Fatalf("challenge flag: %v", cfg.NIP42.SendChallengeOnConnect)
+			}
+			saved, err := json.Marshal(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(saved), `"require_auth":`) {
+				t.Fatal("connection gate survived config save")
+			}
+		})
 	}
 }
 

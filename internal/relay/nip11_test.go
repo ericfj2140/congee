@@ -106,16 +106,16 @@ func TestNIP11IdentityAndEnforcedLimitations(t *testing.T) {
 	if _, ok := limits["default_limit"]; ok {
 		t.Fatal("disabled default cap should be omitted")
 	}
-	cfg.NIP42.RequireAuth = config.NIP42RequireAuthConnect
+	cfg.NIP42.SendChallengeOnConnect = true
 	doc = read()
 	limits = doc["limitation"].(map[string]any)
-	if limits["auth_required"] != true {
-		t.Fatalf("connect mode should advertise auth_required: %v", limits)
+	if limits["auth_required"] != false {
+		t.Fatalf("optional challenge must not advertise mandatory authentication: %v", limits)
 	}
 	cfg.NIPs.Enabled = []int{1, 11}
 	doc = read()
 	limits = doc["limitation"].(map[string]any)
 	if limits["auth_required"] != false {
-		t.Fatal("connect mode must not lock the relay when NIP-42 is disabled")
+		t.Fatal("disabled NIP-42 must not advertise mandatory authentication")
 	}
 }

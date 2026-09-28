@@ -29,7 +29,7 @@ Related plans (under `docs/plans/` locally, if present): relay identity secrets,
 |--------|--------|----------------|
 | Relay identity | Open admin dashboard | `npub` + hex pubkey match `GET /api/relay-identity` |
 | NIP-11 | `curl -H 'Accept: application/nostr+json' http://127.0.0.1:<port>/` | JSON includes relay `self`, accurate `limitation`, and `supported_nips`; `pubkey` appears only when an administrator contact is set |
-| NIP-42 | Connect WS. `require_auth: connect` challenges immediately and rejects commands until AUTH. `protected_kinds` challenges only for listed kinds | `CLOSED` or `OK` with `auth-required:` until AUTH, then the same command succeeds |
+| NIP-42 | Connect WS. `send_challenge_on_connect` optionally challenges immediately without blocking public requests. Protected operations challenge lazily | Public REQ succeeds without AUTH; protected operations return `auth-required:` until AUTH; NIP-17 serves wraps only to authenticated recipients |
 | NIP-29 | Publish `h`-tagged event after 9007 bootstrap | Stored; `previous` invalid id → `OK` false; restricted group requires membership |
 
 ### 3. Programmatic external harness (optional repo artifact)

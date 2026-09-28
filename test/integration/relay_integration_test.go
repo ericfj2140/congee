@@ -71,7 +71,7 @@ func writeIntegrationConfig(dir, dsn string) string {
 	return p
 }
 
-func writeNIP42IntegrationConfig(dir, dsn, relayWSURL, requireAuth string) string {
+func writeNIP42IntegrationConfig(dir, dsn, relayWSURL string, sendChallengeOnConnect bool) string {
 	p := filepath.Join(dir, "config-nip42.json")
 	body := `{
   "relay": { "port": 3334 },
@@ -111,7 +111,7 @@ func writeNIP42IntegrationConfig(dir, dsn, relayWSURL, requireAuth string) strin
   },
   "nip42": {
     "relay_url": ` + strconv.Quote(relayWSURL) + `,
-    "require_auth": ` + strconv.Quote(requireAuth) + `,
+    "send_challenge_on_connect": ` + strconv.FormatBool(sendChallengeOnConnect) + `,
     "created_at_skew_seconds": 600,
     "require_auth_subscribe_kinds": [4],
     "require_auth_publish_kinds": [1],
@@ -167,7 +167,7 @@ func writeNIP29IntegrationConfig(dir, dsn string) string {
   },
   "nip42": {
     "relay_url": "",
-    "require_auth": "protected_kinds",
+    "send_challenge_on_connect": false,
     "created_at_skew_seconds": 600,
     "require_auth_subscribe_kinds": [],
     "require_auth_publish_kinds": [],
@@ -592,7 +592,7 @@ var _ = Describe("Relay WebSocket and HTTP", func() {
 })
 
 var _ = Describe("NIP-42 authentication", func() {
-	It("sends AUTH challenge, rejects REQ until AUTH, then accepts REQ and EVENT", func() {
+	It("sends an optional AUTH challenge without blocking public REQ, then authenticates protected operations", func() {
 		tmpDir := GinkgoT().TempDir()
 		dbPath := filepath.Join(tmpDir, "nip42.db")
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -600,7 +600,7 @@ var _ = Describe("NIP-42 authentication", func() {
 		defer ln.Close()
 		port := ln.Addr().(*net.TCPAddr).Port
 		relayWSURL := fmt.Sprintf("ws://127.0.0.1:%d/", port)
-		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, config.NIP42RequireAuthConnect)
+		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, true)
 
 		cfg, err := config.LoadJSON(cfgPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -638,15 +638,12 @@ var _ = Describe("NIP-42 authentication", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.WriteMessage(websocket.TextMessage, reqPayload)).To(Succeed())
 
-		_, closedData, err := c.ReadMessage()
+		_, publicData, err := c.ReadMessage()
 		Expect(err).NotTo(HaveOccurred())
-		var closed []any
-		Expect(json.Unmarshal(closedData, &closed)).To(Succeed())
-		Expect(closed[0]).To(Equal("CLOSED"))
-		Expect(closed[1]).To(Equal("sub-open"))
-		msg, ok := closed[2].(string)
-		Expect(ok).To(BeTrue())
-		Expect(msg).To(HavePrefix("auth-required:"))
+		var publicResult []any
+		Expect(json.Unmarshal(publicData, &publicResult)).To(Succeed())
+		Expect(publicResult[0]).To(Equal("EOSE"))
+		Expect(publicResult[1]).To(Equal("sub-open"))
 
 		priv, err := btcec.NewPrivateKey()
 		Expect(err).NotTo(HaveOccurred())
@@ -687,7 +684,7 @@ var _ = Describe("NIP-42 authentication", func() {
 		Expect(srv.Shutdown(ctx)).To(Succeed())
 	})
 
-	It("sends AUTH challenge on first gated REQ when require_auth is protected_kinds", func() {
+	It("sends AUTH challenge on first gated REQ when send_challenge_on_connect is false", func() {
 		tmpDir := GinkgoT().TempDir()
 		dbPath := filepath.Join(tmpDir, "nip42-lazy.db")
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -695,7 +692,7 @@ var _ = Describe("NIP-42 authentication", func() {
 		defer ln.Close()
 		port := ln.Addr().(*net.TCPAddr).Port
 		relayWSURL := fmt.Sprintf("ws://127.0.0.1:%d/", port)
-		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, config.NIP42RequireAuthProtectedKinds)
+		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, false)
 
 		cfg, err := config.LoadJSON(cfgPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -768,7 +765,7 @@ var _ = Describe("NIP-42 authentication", func() {
 		Expect(srv.Shutdown(ctx)).To(Succeed())
 	})
 
-	It("sends AUTH before OK false when publish requires auth and require_auth is protected_kinds", func() {
+	It("sends AUTH before OK false when publish requires auth and send_challenge_on_connect is false", func() {
 		tmpDir := GinkgoT().TempDir()
 		dbPath := filepath.Join(tmpDir, "nip42-pub-lazy.db")
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -776,7 +773,7 @@ var _ = Describe("NIP-42 authentication", func() {
 		defer ln.Close()
 		port := ln.Addr().(*net.TCPAddr).Port
 		relayWSURL := fmt.Sprintf("ws://127.0.0.1:%d/", port)
-		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, config.NIP42RequireAuthProtectedKinds)
+		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, false)
 
 		cfg, err := config.LoadJSON(cfgPath)
 		Expect(err).NotTo(HaveOccurred())
@@ -859,13 +856,12 @@ var _ = Describe("NIP-42 authentication", func() {
 		defer ln.Close()
 		port := ln.Addr().(*net.TCPAddr).Port
 		relayWSURL := fmt.Sprintf("ws://127.0.0.1:%d/", port)
-		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, config.NIP42RequireAuthProtectedKinds)
+		cfgPath := writeNIP42IntegrationConfig(tmpDir, dbPath, relayWSURL, false)
 		raw, err := os.ReadFile(cfgPath)
 		Expect(err).NotTo(HaveOccurred())
 		var doc map[string]any
 		Expect(json.Unmarshal(raw, &doc)).To(Succeed())
 		nip42 := doc["nip42"].(map[string]any)
-		delete(nip42, "require_auth")
 		nip42["send_challenge_on_connect"] = true
 		rewritten, err := json.Marshal(doc)
 		Expect(err).NotTo(HaveOccurred())
@@ -873,7 +869,7 @@ var _ = Describe("NIP-42 authentication", func() {
 
 		cfg, err := config.LoadJSON(cfgPath)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(cfg.NIP42.RequireAuth).To(Equal(config.NIP42RequireAuthProtectedKinds))
+		Expect(cfg.NIP42.SendChallengeOnConnect).To(BeTrue())
 
 		st, closeStore, err := db.OpenTestStore(context.Background(), dbPath, zerolog.Nop())
 		Expect(err).NotTo(HaveOccurred())
@@ -895,6 +891,11 @@ var _ = Describe("NIP-42 authentication", func() {
 		reqPayload, err := json.Marshal([]any{"REQ", "open", map[string]any{"kinds": []int{1}}})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(c.WriteMessage(websocket.TextMessage, reqPayload)).To(Succeed())
+		_, challengeData, err := c.ReadMessage()
+		Expect(err).NotTo(HaveOccurred())
+		var challenge []any
+		Expect(json.Unmarshal(challengeData, &challenge)).To(Succeed())
+		Expect(challenge[0]).To(Equal("AUTH"))
 		_, data, err := c.ReadMessage()
 		Expect(err).NotTo(HaveOccurred())
 		var msg []any

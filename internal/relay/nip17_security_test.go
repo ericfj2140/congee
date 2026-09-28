@@ -167,7 +167,7 @@ func TestHandleREQ_NIP17_IDsOnlyGiftWrapWithoutAuth_EmptySnapshotNoLeak(t *testi
 	}
 }
 
-func TestHandleREQ_NIP17_Kinds1059WithoutAuth_EmptySnapshotNoLeak(t *testing.T) {
+func TestHandleREQ_NIP17_Kinds1059WithoutAuth_ChallengesWithoutLeaking(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("b", 64)
 	priv, err := btcec.NewPrivateKey()
@@ -189,11 +189,24 @@ func TestHandleREQ_NIP17_Kinds1059WithoutAuth_EmptySnapshotNoLeak(t *testing.T) 
 	if err := handleREQ(context.Background(), srv, c, req, false); err != nil {
 		t.Fatal(err)
 	}
-	types := drainOutboundChan(t, c, 8)
-	assertOutboundHasNoAuthLeak(t, types)
-	if len(types) != 1 || types[0] != "EOSE" {
-		t.Fatalf("want only EOSE without AUTH, got %#v", types)
+	for _, want := range []string{"AUTH", "CLOSED"} {
+		select {
+		case frame := <-c.send:
+			var msg []any
+			if err := json.Unmarshal(frame, &msg); err != nil {
+				t.Fatal(err)
+			}
+			if msg[0] != want {
+				t.Fatalf("want %s, got %v", want, msg[0])
+			}
+			if want == "CLOSED" && !strings.HasPrefix(msg[2].(string), "auth-required:") {
+				t.Fatalf("missing auth-required reason: %v", msg)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %s", want)
+		}
 	}
+
 }
 
 func TestHandleREQ_NIP17_IDsOnlyWithAuthRecipientGetsEventThenEOSE(t *testing.T) {

@@ -179,42 +179,16 @@ type NIPsSection struct {
 	Enabled []int `json:"enabled"`
 }
 
-const (
-	// NIP42RequireAuthProtectedKinds sends AUTH only when a protected kind is hit.
-	// Ordinary requests stay open. NIP-11 auth_required is false.
-	NIP42RequireAuthProtectedKinds = "protected_kinds"
-	// NIP42RequireAuthConnect challenges on WebSocket open and rejects every
-	// client command except AUTH until the connection authenticates.
-	// NIP-11 auth_required is true when NIP-42 is enabled.
-	NIP42RequireAuthConnect = "connect"
-)
-
 // NIP42Section configures NIP-42 client authentication (optional NIP).
 type NIP42Section struct {
-	RelayURL string `json:"relay_url"`
-	// RequireAuth is protected_kinds (lazy AUTH) or connect (reject traffic until AUTH).
-	// Legacy send_challenge_on_connect loads as protected_kinds.
-	RequireAuth string `json:"require_auth"`
+	RelayURL               string `json:"relay_url"`
+	SendChallengeOnConnect bool   `json:"send_challenge_on_connect"`
 	// CreatedAtSkewSeconds is the maximum allowed |now - event.created_at| for AUTH events (seconds).
 	// Values <= 0 mean the relay uses its runtime default (600s).
 	CreatedAtSkewSeconds      int      `json:"created_at_skew_seconds"`
 	RequireAuthSubscribeKinds []int    `json:"require_auth_subscribe_kinds"`
 	RequireAuthPublishKinds   []int    `json:"require_auth_publish_kinds"`
 	AllowlistedPubkeys        []string `json:"allowlisted_pubkeys"`
-}
-
-// NIP11AuthRequired reports whether the NIP-11 limitation field auth_required is true.
-// Connect mode locks the relay only when NIP-42 itself is enabled.
-func NIP11AuthRequired(cfg *Config) bool {
-	if cfg == nil || cfg.NIP42.RequireAuth != NIP42RequireAuthConnect {
-		return false
-	}
-	for _, n := range cfg.NIPs.Enabled {
-		if n == 42 {
-			return true
-		}
-	}
-	return false
 }
 
 // NIP17Section configures NIP-17 private direct messages (optional NIP).
