@@ -257,3 +257,42 @@ func TestIsReconnectable(t *testing.T) {
 		t.Fatal("constraint errors should not trigger reconnect")
 	}
 }
+
+func TestBusyReadConnectionDoesNotReconnectWriter(t *testing.T) {
+	ctx := context.Background()
+	var reconnects atomic.Int32
+	q := newTestQueue(t, t.TempDir()+"/busy-read.db", Options{OpenHandles: func(context.Context, string, zerolog.Logger) (*sql.DB, *bun.DB, error) {
+		reconnects.Add(1)
+		return nil, nil, errors.New("healthy database must not reconnect for pool contention")
+	}})
+	defer q.Close()
+	original := q.DB()
+	if _, err := original.ExecContext(ctx, "CREATE TABLE writer_contention_test (value INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := q.sqldb.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	released := make(chan struct{})
+	go func() { time.Sleep(6 * time.Second); conn.Close(); close(released) }()
+	err = q.RunWrite(ctx, "write-after-busy-read", func(ctx context.Context, db bun.IDB) error {
+		_, err := db.ExecContext(ctx, "INSERT INTO writer_contention_test VALUES (1)")
+		return err
+	})
+	<-released
+	if err != nil {
+		t.Fatalf("busy reader caused write failure: %v", err)
+	}
+	if reconnects.Load() != 0 {
+		t.Fatalf("reconnected a healthy busy database %d times", reconnects.Load())
+	}
+	if q.DB() != original {
+		t.Fatal("replaced database handle during ordinary contention")
+	}
+	var count int
+	if err := original.QueryRowContext(ctx, "SELECT COUNT(*) FROM writer_contention_test").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("write was not retained: count=%d err=%v", count, err)
+	}
+}

@@ -411,9 +411,22 @@ func (q *Queue) ping() error {
 	if sqldb == nil {
 		return errors.New("sql.DB is nil")
 	}
+	// Reads and writes share a single native SQLite connection. A busy pool is
+	// healthy: probing it must not close the handle underneath the active reader.
+	stats := sqldb.Stats()
+	if stats.MaxOpenConnections > 0 && stats.InUse >= stats.MaxOpenConnections {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return sqldb.PingContext(ctx)
+	err := sqldb.PingContext(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// A reader may acquire the connection after the stats check. Let the
+		// write use its existing task deadline instead of reconnecting on contention.
+		q.log.Debug().Msg("writer ping timed out waiting for shared connection")
+		return nil
+	}
+	return err
 }
 
 // reconnect closes and reopens the database handle. Writer tasks block during reconnect.
