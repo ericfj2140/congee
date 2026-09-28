@@ -296,3 +296,32 @@ func TestBusyReadConnectionDoesNotReconnectWriter(t *testing.T) {
 		t.Fatalf("write was not retained: count=%d err=%v", count, err)
 	}
 }
+
+func TestLibsqlAnalyzeUsesBoundedSampling(t *testing.T) {
+	ctx := context.Background()
+	q := newTestQueue(t, t.TempDir()+"/analyze.db", Options{})
+	defer q.Close()
+	var limit int
+	if err := q.DB().QueryRowContext(ctx, "PRAGMA analysis_limit").Scan(&limit); err != nil {
+		t.Fatal(err)
+	}
+	if limit <= 0 || limit > 1000 {
+		t.Fatalf("scheduled ANALYZE must sample at most 1000 rows per index; limit=%d", limit)
+	}
+	if _, err := q.DB().ExecContext(ctx, "CREATE TABLE analyze_test (id INTEGER PRIMARY KEY, value INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.DB().ExecContext(ctx, "CREATE INDEX analyze_test_value ON analyze_test(value)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.DB().ExecContext(ctx, "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000) INSERT INTO analyze_test SELECT x, x%10 FROM n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.DB().ExecContext(ctx, "ANALYZE analyze_test"); err != nil {
+		t.Fatal(err)
+	}
+	var stat string
+	if err := q.DB().QueryRowContext(ctx, "SELECT stat FROM sqlite_stat1 WHERE idx='analyze_test_value'").Scan(&stat); err != nil || stat == "" {
+		t.Fatalf("bounded ANALYZE must still populate planner statistics: stat=%q err=%v", stat, err)
+	}
+}
