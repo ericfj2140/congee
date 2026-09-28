@@ -3,12 +3,13 @@
 	import AdminPageHeading from '$lib/components/AdminPageHeading.svelte';
 	import ClipCopy from '$lib/components/ClipCopy.svelte';
 	import { getAdminConfig } from '$lib/config/admin-config-context';
+	import Nip11ImageField from '$lib/components/Nip11ImageField.svelte';
+	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Switch } from '$lib/components/ui/switch';
 	import { Textarea } from '$lib/components/ui/textarea';
-	import Nip11ImageField from '$lib/components/Nip11ImageField.svelte';
 
 	const ctx = getAdminConfig();
 
@@ -16,15 +17,9 @@
 		return ctx.draft!;
 	}
 
-	const nip11Auth = $derived.by(() => {
-		const mode = draft().nip42.require_auth;
-		const enabled = draft().nips.enabled.includes(42);
-		return {
-			mode,
-			enabled,
-			authRequired: enabled && mode === 'connect'
-		};
-	});
+	const authRequired = $derived(
+		draft().nips.enabled.includes(42) && draft().nip42.require_auth === 'connect'
+	);
 </script>
 
 <section class="space-y-4">
@@ -186,19 +181,16 @@
 					}}
 				/>
 			</div>
-			<div class="space-y-2 rounded-lg border border-border bg-muted/30 px-4 py-3 md:col-span-2">
-				<p class="text-sm font-medium">NIP-11 auth_required</p>
-				<p class="font-mono text-sm">{nip11Auth.authRequired ? 'true' : 'false'}</p>
-				<p class="text-xs text-muted-foreground">
-					Read-only value from the current draft. Require AUTH is
-					{nip11Auth.mode === 'connect' ? 'connect' : 'protected kinds'}.
-					{#if nip11Auth.enabled}
-						NIP-42 is enabled.
-					{:else}
-						NIP-42 is disabled, so auth_required stays false.
-					{/if}
-					Change the mode under Security.
+			<div
+				class="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 px-4 py-3 md:col-span-2 sm:flex-row sm:items-center sm:justify-between"
+			>
+				<p class="text-sm">
+					<span class="font-medium">Auth Required</span>:
+					<span class="font-mono">{authRequired ? 'True' : 'False'}</span>
 				</p>
+				<Button href="/config/security#require-auth-on" variant="outline" size="sm">
+					Configure here
+				</Button>
 			</div>
 		</Card.Content>
 	</Card.Root>

@@ -161,7 +161,10 @@
 						}}
 					/>
 				</div>
-				<fieldset class="space-y-3 rounded-lg border border-border bg-muted/30 px-4 py-3 md:col-span-2">
+				<fieldset
+					id="require-auth-on"
+					class="scroll-mt-8 space-y-3 rounded-lg border border-border bg-muted/30 px-4 py-3 md:col-span-2"
+				>
 					<legend class="px-1 text-sm font-medium">Require AUTH on</legend>
 					<label class="flex items-start gap-2 text-sm">
 						<input
