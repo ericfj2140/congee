@@ -382,6 +382,15 @@ func createTursoContentFTS(ctx context.Context, db *bun.DB, engine string) error
 }
 
 func migratePagingIndexes(ctx context.Context, db *bun.DB) error {
+	// Legacy meta-only files have no events table, as in the v7→v8 path.
+	var exists int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='events'`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		_, err := db.ExecContext(ctx, `PRAGMA user_version = 9`)
+		return err
+	}
 	for _, query := range []string{`CREATE INDEX IF NOT EXISTS idx_events_page ON events (created_at DESC, id ASC)`, `CREATE INDEX IF NOT EXISTS idx_events_merchant_page ON events (pubkey, kind, created_at DESC, id ASC)`} {
 		if _, err := db.ExecContext(ctx, query); err != nil {
 			return fmt.Errorf("paging indexes: %w", err)
