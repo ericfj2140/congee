@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"github.com/michmich112/congee/internal/storage/turso"
 	"os"
 	"path/filepath"
 	"strings"
@@ -143,8 +144,8 @@ func TestLegacyMetaMigrationFromV6EventsDB(t *testing.T) {
 	if err := checkDB.QueryRowContext(ctx, "PRAGMA user_version").Scan(&userVer); err != nil {
 		t.Fatal(err)
 	}
-	if userVer != 8 {
-		t.Fatalf("events db user_version=%d want 8", userVer)
+	if userVer != turso.CurrentSchemaVersion() {
+		t.Fatalf("events db user_version=%d want %d", userVer, turso.CurrentSchemaVersion())
 	}
 	var hasAudit bool
 	if err := checkDB.QueryRowContext(ctx,

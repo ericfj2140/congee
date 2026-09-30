@@ -16,6 +16,8 @@ import (
 	"github.com/michmich112/congee/sdk/plugin/pluginv1"
 	"github.com/rs/zerolog"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Manager owns plugin processes and implements Runtime.
@@ -588,7 +590,7 @@ type hostBridge struct {
 
 func (h *hostBridge) QueryEvents(ctx context.Context, req *pluginv1.QueryEventsRequest) (*pluginv1.QueryEventsResponse, error) {
 	if h.m.store == nil {
-		return &pluginv1.QueryEventsResponse{}, nil
+		return nil, status.Error(codes.Unavailable, "event storage unavailable")
 	}
 	filters := sdkFiltersToNostr(filtersFromV1(req.GetFilters()))
 	evs, err := h.m.store.QueryEvents(ctx, filters)
@@ -630,4 +632,37 @@ func (h *hostBridge) Log(ctx context.Context, req *pluginv1.LogRequest) (*plugin
 	}
 	e.Msg(req.GetMessage())
 	return &pluginv1.LogResponse{}, nil
+}
+
+func (h *hostBridge) QueryEventsPage(ctx context.Context, r *pluginv1.QueryEventsPageRequest) (*pluginv1.QueryEventsPageResponse, error) {
+	if h.m.store == nil {
+		return nil, status.Error(codes.Unavailable, "event storage unavailable")
+	}
+	p, ok := h.m.store.(storage.PagedEventStore)
+	if !ok {
+		return nil, status.Error(codes.Unimplemented, "event backend does not support paging")
+	}
+	var cursor *storage.EventCursor
+	if c := r.GetCursor(); c != nil {
+		cursor = &storage.EventCursor{CreatedAt: c.GetCreatedAt(), ID: c.GetId(), FilterHash: c.GetFilterHash()}
+	}
+	filters := sdkFiltersToNostr(filtersFromV1([]*pluginv1.Filter{r.GetFilter()}))
+	if len(filters) != 1 {
+		return nil, status.Error(codes.InvalidArgument, "one structural filter is required")
+	}
+	if _, err := storage.ValidateEventPage(filters[0], cursor, int(r.GetPageSize())); err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	page, err := p.QueryEventsPage(ctx, filters[0], cursor, int(r.GetPageSize()))
+	if err != nil {
+		return nil, err
+	}
+	out := &pluginv1.QueryEventsPageResponse{}
+	for _, ev := range page.Events {
+		out.Events = append(out.Events, eventToV1(nostrEventToSDK(ev)))
+	}
+	if c := page.Next; c != nil {
+		out.Next = &pluginv1.EventCursor{CreatedAt: c.CreatedAt, Id: c.ID, FilterHash: c.FilterHash}
+	}
+	return out, nil
 }

@@ -33,7 +33,7 @@ func TestUpgradeV7FTS5KeepsEvents(t *testing.T) {
 	if err := st.DB().QueryRowContext(ctx, `PRAGMA user_version`).Scan(&uv); err != nil {
 		t.Fatal(err)
 	}
-	if uv != 8 {
+	if uv != CurrentSchemaVersion() {
 		t.Fatalf("user_version %d", uv)
 	}
 	var mode string
@@ -76,7 +76,7 @@ func TestUpgradeV7FTS5KeepsEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	if err := st2.DB().QueryRowContext(ctx, `PRAGMA user_version`).Scan(&uv); err != nil || uv != 8 {
+	if err := st2.DB().QueryRowContext(ctx, `PRAGMA user_version`).Scan(&uv); err != nil || uv != CurrentSchemaVersion() {
 		t.Fatalf("second open version %d %v", uv, err)
 	}
 	raw2, err := os.ReadFile(bak)

@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/michmich112/congee/internal/nostr"
 	"github.com/michmich112/congee/internal/storage"
@@ -177,4 +178,12 @@ func (c *compositeStore) AdminStorageSnapshot(ctx context.Context) (storage.Admi
 		}
 	}
 	return out, firstErr
+}
+
+func (c *compositeStore) QueryEventsPage(ctx context.Context, f nostr.Filter, cursor *storage.EventCursor, size int) (storage.EventPage, error) {
+	p, ok := c.events.(storage.PagedEventStore)
+	if !ok {
+		return storage.EventPage{}, fmt.Errorf("event backend does not support paging")
+	}
+	return p.QueryEventsPage(ctx, f, cursor, size)
 }

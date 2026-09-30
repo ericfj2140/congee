@@ -9,7 +9,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-const schemaVersion = 8
+const schemaVersion = 9
 
 // CurrentSchemaVersion is the PRAGMA user_version / app-expected value for this binary.
 func CurrentSchemaVersion() int { return schemaVersion }
@@ -78,6 +78,10 @@ func runMigrations(ctx context.Context, db *bun.DB, engine string, log zerolog.L
 			if err := migrateV7ToV8(ctx, db, engine, log); err != nil {
 				return err
 			}
+		case 8:
+			if err := migratePagingIndexes(ctx, db); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("%s: unsupported schema version %d", engine, version)
 		}
@@ -98,6 +102,8 @@ func migrateFresh(ctx context.Context, db *bun.DB, engine string, log zerolog.Lo
 		`CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind ON events (pubkey, kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind_dtag ON events (pubkey, kind, d_tag)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_page ON events (created_at DESC, id ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_merchant_page ON events (pubkey, kind, created_at DESC, id ASC)`,
 		`CREATE TABLE IF NOT EXISTS event_tags (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -373,4 +379,14 @@ func createTursoContentFTS(ctx context.Context, db *bun.DB, engine string) error
 		return fmt.Errorf("%s: turso fts: %w", engine, err)
 	}
 	return nil
+}
+
+func migratePagingIndexes(ctx context.Context, db *bun.DB) error {
+	for _, query := range []string{`CREATE INDEX IF NOT EXISTS idx_events_page ON events (created_at DESC, id ASC)`, `CREATE INDEX IF NOT EXISTS idx_events_merchant_page ON events (pubkey, kind, created_at DESC, id ASC)`} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("paging indexes: %w", err)
+		}
+	}
+	_, err := db.ExecContext(ctx, `PRAGMA user_version = 9`)
+	return err
 }

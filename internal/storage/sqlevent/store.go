@@ -578,3 +578,39 @@ func (s *Store) IsGroupMember(ctx context.Context, relayPubkey, groupID, memberP
 		return false, nil
 	}
 }
+
+// QueryEventsPage returns one bounded structural page; continuation survives deletion of the cursor row.
+func (s *Store) QueryEventsPage(ctx context.Context, f nostr.Filter, cursor *storage.EventCursor, size int) (storage.EventPage, error) {
+	fingerprint, err := storage.ValidateEventPage(f, cursor, size)
+	if err != nil {
+		return storage.EventPage{}, err
+	}
+	var rows []storage.EventRow
+	q := s.db().NewSelect().Model(&rows)
+	q = applyFilterQuery(q, &f)
+	if cursor != nil {
+		q = q.Where("(created_at < ? OR (created_at = ? AND id > ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
+	q = q.Order("created_at DESC", "id ASC").Limit(size + 1)
+	if err := q.Scan(ctx); err != nil {
+		return storage.EventPage{}, err
+	}
+	page := storage.EventPage{}
+	if len(rows) > size {
+		rows = rows[:size]
+		last := rows[len(rows)-1]
+		page.Next = &storage.EventCursor{CreatedAt: last.CreatedAt, ID: last.ID, FilterHash: fingerprint}
+	}
+	ids := make([]string, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	tags, err := s.tagsByEventID(ctx, ids)
+	if err != nil {
+		return storage.EventPage{}, err
+	}
+	for i := range rows {
+		page.Events = append(page.Events, rowToEventWithTags(&rows[i], tags[rows[i].ID]))
+	}
+	return page, nil
+}

@@ -22,6 +22,17 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: congee
+          POSTGRES_PASSWORD: congee
+          POSTGRES_DB: congee_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U congee"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -42,9 +53,25 @@ jobs:
       - run: go mod download && ./scripts/overlay-turso-fts.sh
 
       - run: CGO_ENABLED=1 go test ./...
+      - run: go test ./...
+        working-directory: sdk/plugin
+      - run: CGO_ENABLED=1 go test ./internal/storage/postgres -run '^TestEventPage'
+        env:
+          TEST_POSTGRES_DSN: postgres://congee:congee@127.0.0.1:5432/congee_test?sslmode=disable
 
   test-race:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: congee
+          POSTGRES_PASSWORD: congee
+          POSTGRES_DB: congee_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U congee"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,3 +92,8 @@ jobs:
       - run: go mod download && ./scripts/overlay-turso-fts.sh
 
       - run: CGO_ENABLED=1 go test -race ./...
+      - run: go test -race ./...
+        working-directory: sdk/plugin
+      - run: CGO_ENABLED=1 go test -race ./internal/storage/postgres -run '^TestEventPage'
+        env:
+          TEST_POSTGRES_DSN: postgres://congee:congee@127.0.0.1:5432/congee_test?sslmode=disable

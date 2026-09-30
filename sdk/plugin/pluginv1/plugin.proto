@@ -158,7 +158,23 @@ service Plugin {
   rpc Status(StatusRequest) returns (StatusResponse);
 }
 
+message EventCursor {
+  int64 created_at = 1;
+  string id = 2;
+  string filter_hash = 3;
+}
+message QueryEventsPageRequest {
+  Filter filter = 1;
+  EventCursor cursor = 2;
+  int32 page_size = 3;
+}
+message QueryEventsPageResponse {
+  repeated Event events = 1;
+  EventCursor next = 2;
+}
+
 service Host {
+  rpc QueryEventsPage(QueryEventsPageRequest) returns (QueryEventsPageResponse);
   rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse);
   rpc GetEventsByIDs(GetEventsByIDsRequest) returns (GetEventsByIDsResponse);
   rpc Log(LogRequest) returns (LogResponse);

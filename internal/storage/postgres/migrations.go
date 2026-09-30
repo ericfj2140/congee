@@ -8,7 +8,7 @@ import (
 	"github.com/uptrace/bun"
 )
 
-const schemaVersion = 7
+const schemaVersion = 8
 
 // CurrentSchemaVersion is the congee_schema_version / app-expected value for this binary.
 func CurrentSchemaVersion() int { return schemaVersion }
@@ -77,6 +77,10 @@ func runMigrations(ctx context.Context, db *bun.DB, log zerolog.Logger) error {
 			if err := migrateV6ToV7(ctx, db, log); err != nil {
 				return err
 			}
+		case 7:
+			if err := migratePagingIndexes(ctx, db); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("postgres: unsupported schema version %d", version)
 		}
@@ -105,6 +109,8 @@ func migrateFresh(ctx context.Context, db *bun.DB, log zerolog.Logger) error {
 		`CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind ON events (pubkey, kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_pubkey_kind_dtag ON events (pubkey, kind, d_tag)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_created_at ON events (created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_page ON events (created_at DESC, id ASC)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_merchant_page ON events (pubkey, kind, created_at DESC, id ASC)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_search_vector ON events USING GIN (search_vector)`,
 		`CREATE TABLE IF NOT EXISTS event_tags (
 			id BIGSERIAL PRIMARY KEY,
@@ -263,8 +269,18 @@ func migrateV6ToV7(ctx context.Context, db *bun.DB, log zerolog.Logger) error {
 		}
 	}
 	log.Debug().Msg("schema v6->v7: bump schema version to 7")
-	if _, err := db.ExecContext(ctx, `UPDATE congee_schema_version SET version = ? WHERE id = 1`, schemaVersion); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE congee_schema_version SET version = ? WHERE id = 1`, 7); err != nil {
 		return fmt.Errorf("postgres: bump schema version: %w", err)
 	}
 	return nil
+}
+
+func migratePagingIndexes(ctx context.Context, db *bun.DB) error {
+	for _, query := range []string{`CREATE INDEX IF NOT EXISTS idx_events_page ON events (created_at DESC, id ASC)`, `CREATE INDEX IF NOT EXISTS idx_events_merchant_page ON events (pubkey, kind, created_at DESC, id ASC)`} {
+		if _, err := db.ExecContext(ctx, query); err != nil {
+			return fmt.Errorf("paging indexes: %w", err)
+		}
+	}
+	_, err := db.ExecContext(ctx, `UPDATE congee_schema_version SET version = 8 WHERE id = 1`)
+	return err
 }
