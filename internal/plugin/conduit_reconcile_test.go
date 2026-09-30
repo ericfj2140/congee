@@ -39,7 +39,9 @@ func TestConduitCanonicalReconciliation(t *testing.T) {
 	}
 	// Entire source discovery must cross the same-second 200-event boundary.
 	for n := 0; n < 205; n++ {
-		if err := store.SaveEvent(ctx, event(n+100, n, 10, "catalogue")); err != nil {
+		ev := event(n+100, n, 10, "catalogue")
+		ev.PubKey = fmt.Sprintf("%064x", 315)
+		if err := store.SaveEvent(ctx, ev); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,9 +82,11 @@ func TestConduitCanonicalReconciliation(t *testing.T) {
 		t.Fatal("plugin did not start")
 	}
 	search := "needle"
-	req := &nostr.ReqMessage{SubID: "test", Filters: []nostr.Filter{{Kinds: []int{30402}, Search: &search}}}
+	req := &nostr.ReqMessage{SubID: "test", Filters: []nostr.Filter{{Kinds: []int{30402}, Authors: []string{author}, Search: &search}}}
 	wait := func(want int, ids []string) {
 		t.Helper()
+		lastStatus := ""
+		lastAction, lastIDs := InterceptPassthrough, 0
 		for ctx.Err() == nil {
 			in.mu.Lock()
 			client := in.client
@@ -99,6 +103,10 @@ func TestConduitCanonicalReconciliation(t *testing.T) {
 					json.Unmarshal([]byte(status.Json), &stats)
 				}
 				got := m.InterceptREQ(ctx, req)
+				if status != nil {
+					lastStatus = status.Json
+				}
+				lastAction, lastIDs = got.Action, len(got.EventIDs)
 				if err == nil && status.Ready && stats.Active == want && stats.Reconciliation.Pending == 0 && got.Action == InterceptRespond && fmt.Sprint(got.EventIDs) == fmt.Sprint(ids) {
 					return
 				}
@@ -108,7 +116,7 @@ func TestConduitCanonicalReconciliation(t *testing.T) {
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
-		t.Fatal("plugin did not converge through real host/storage/gRPC")
+		t.Fatalf("plugin did not converge: status=%s action=%d ids=%d", lastStatus, lastAction, lastIDs)
 	}
 	// No stored-event notifications are sent: these are missed-callback cases.
 	wait(206, []string{winner.ID})
