@@ -187,6 +187,9 @@ func applyFilterQueryPrefix(q *bun.SelectQuery, f *nostr.Filter, prefix string) 
 		}
 		return prefix + name
 	}
+	if predicate, args := storage.ReadScopeSQL(f.ReadScope, prefix); predicate != "" {
+		q = q.Where(predicate, args...)
+	}
 	if len(f.IDs) > 0 {
 		q = q.Where(col("id")+" IN (?)", bun.In(f.IDs))
 	}
@@ -403,6 +406,10 @@ WHERE event_fts MATCH ?`)
 }
 
 func sqliteAppendSearchFilter(sb *strings.Builder, args *[]interface{}, f *nostr.Filter) {
+	if predicate, scopeArgs := storage.ReadScopeSQL(f.ReadScope, "events."); predicate != "" {
+		sb.WriteString(" AND " + predicate)
+		*args = append(*args, scopeArgs...)
+	}
 	if len(f.IDs) > 0 {
 		sb.WriteString(" AND events.id IN (")
 		for i, id := range f.IDs {
@@ -556,4 +563,3 @@ func (s *Store) IsGroupMember(ctx context.Context, relayPubkey, groupID, memberP
 		return false, nil
 	}
 }
-

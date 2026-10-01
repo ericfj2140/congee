@@ -179,7 +179,7 @@ func registerNIP01NIP42NIP17(srv *Server, st storage.Store) {
 	RegisterNIP17(srv, st)
 }
 
-func TestHandleREQ_NIP17_IDsOnlyGiftWrapWithoutAuth_BlockedBeforeQuery(t *testing.T) {
+func TestHandleREQ_NIP17_IDsOnlyGiftWrapWithoutAuth_Withheld(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("a", 64)
 	priv, err := btcec.NewPrivateKey()
@@ -202,7 +202,7 @@ func TestHandleREQ_NIP17_IDsOnlyGiftWrapWithoutAuth_BlockedBeforeQuery(t *testin
 	if err := handleREQ(ctx, srv, c, req, false); err != nil {
 		t.Fatal(err)
 	}
-	assertClosedWithoutEvent(t, c, "blocked:")
+	assertEmptySnapshot(t, c)
 }
 
 func TestHandleREQ_NIP17_Kinds1059WithoutAuth_RequiresAuth(t *testing.T) {
@@ -292,7 +292,7 @@ func TestHandleREQ_NIP17_BackendOverReturnDoesNotLeakOtherRecipient(t *testing.T
 	}
 }
 
-func TestHandleREQ_NIP17_WrongAuthRecipientBlocked(t *testing.T) {
+func TestHandleREQ_NIP17_WrongAuthRecipientWithheld(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("d", 64)
 	priv, err := btcec.NewPrivateKey()
@@ -315,7 +315,7 @@ func TestHandleREQ_NIP17_WrongAuthRecipientBlocked(t *testing.T) {
 	if err := handleREQ(context.Background(), srv, c, req, false); err != nil {
 		t.Fatal(err)
 	}
-	assertClosedWithoutEvent(t, c, "restricted:")
+	assertEmptySnapshot(t, c)
 }
 
 func TestHandleREQ_NIP17_Kinds1AndIDGiftWrap_NoAuth_NoLeak(t *testing.T) {
@@ -355,7 +355,7 @@ func TestHandleREQ_NIP17_Kinds1AndIDGiftWrap_NoAuth_NoLeak(t *testing.T) {
 	}
 }
 
-func TestHandleREQ_NIP17_MultiFilterORSecondIDsOnlyWithoutAuth_Blocked(t *testing.T) {
+func TestHandleREQ_NIP17_MultiFilterORSecondIDsOnlyWithoutAuth_Withheld(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("1", 64)
 	priv, err := btcec.NewPrivateKey()
@@ -380,10 +380,10 @@ func TestHandleREQ_NIP17_MultiFilterORSecondIDsOnlyWithoutAuth_Blocked(t *testin
 	if err := handleREQ(context.Background(), srv, c, req, false); err != nil {
 		t.Fatal(err)
 	}
-	assertClosedWithoutEvent(t, c, "blocked:")
+	assertEmptySnapshot(t, c)
 }
 
-func TestHandleREQ_NIP17_IDsOnlyUnknownId_Blocked(t *testing.T) {
+func TestHandleREQ_NIP17_IDsOnlyUnknownId_EmptySnapshot(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("a", 64)
 	priv, err := btcec.NewPrivateKey()
@@ -405,7 +405,7 @@ func TestHandleREQ_NIP17_IDsOnlyUnknownId_Blocked(t *testing.T) {
 	if err := handleREQ(context.Background(), srv, c, req, false); err != nil {
 		t.Fatal(err)
 	}
-	assertClosedWithoutEvent(t, c, "blocked:")
+	assertEmptySnapshot(t, c)
 }
 
 func TestHandleREQ_NIP17_ExplicitKind1WithoutAuth_Delivers(t *testing.T) {
@@ -472,7 +472,7 @@ func TestBroadcast_NIP17GiftWrapNotSentToWrongAuthedSubscriber(t *testing.T) {
 	}
 }
 
-func TestBroadcast_EphemeralGiftWrapRequiresCurrentRecipientAuth(t *testing.T) {
+func TestBroadcast_EphemeralGiftWrapRequiresRecipientAuth(t *testing.T) {
 	t.Parallel()
 	alice := strings.Repeat("a", 64)
 	bob := strings.Repeat("b", 64)
@@ -495,8 +495,8 @@ func TestBroadcast_EphemeralGiftWrapRequiresCurrentRecipientAuth(t *testing.T) {
 	srv.broadcastEvent(ev)
 	c.nip42AddPubkey(bob)
 	srv.broadcastEvent(ev)
-	if got != 1 {
-		t.Fatalf("expected only current recipient AUTH to receive live wrap, got %d deliveries", got)
+	if got != 2 {
+		t.Fatalf("second AUTH must preserve the first proven recipient identity, got %d deliveries", got)
 	}
 }
 
@@ -754,5 +754,16 @@ func TestEventVisibleToSubscriptionGiftWrapMultiplePWithheld(t *testing.T) {
 	c.nip42AddPubkey(bob)
 	if srv.EventVisibleToSubscription("multi-p", ev) {
 		t.Fatal("multiple-recipient gift wrap must be withheld")
+	}
+}
+
+func assertEmptySnapshot(t *testing.T, c *Conn) {
+	t.Helper()
+	types := drainOutboundChan(t, c, 8)
+	if len(types) > 0 && types[0] == "AUTH" {
+		types = types[1:]
+	}
+	if len(types) != 1 || types[0] != "EOSE" {
+		t.Fatalf("want empty snapshot, got %v", types)
 	}
 }

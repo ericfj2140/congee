@@ -26,29 +26,6 @@ func nip42CreatedAtSkew(cfg *config.Config) int {
 	return cfg.NIP42.CreatedAtSkewSeconds
 }
 
-// subscribeAuthRequired reports whether any filter may receive events of kinds that require auth.
-func subscribeAuthRequired(cfg *config.Config, filters []nostr.Filter) bool {
-	if !relayNIP42Enabled(cfg) {
-		return false
-	}
-	req := cfg.NIP42.RequireAuthSubscribeKinds
-	if len(req) == 0 {
-		return false
-	}
-	for i := range filters {
-		f := &filters[i]
-		if len(f.Kinds) == 0 {
-			return true
-		}
-		for _, k := range f.Kinds {
-			if slices.Contains(req, k) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func validateNIP42PublishPolicy(cfg *config.Config, c *Conn, ev *nostr.Event) error {
 	if !relayNIP42Enabled(cfg) || ev == nil {
 		return nil
@@ -196,13 +173,6 @@ func (c *Conn) nip42AddPubkey(pk string) {
 		c.nip42Pubkeys = make(map[string]struct{})
 	}
 	c.nip42Pubkeys[pk] = struct{}{}
-	c.nip42CurrentPubkey = pk
-}
-
-func (c *Conn) nip42CurrentAuthPubkey() string {
-	c.authMu.RLock()
-	defer c.authMu.RUnlock()
-	return c.nip42CurrentPubkey
 }
 
 func (c *Conn) nip42HasPubkey(pk string) bool {

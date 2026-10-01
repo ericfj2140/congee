@@ -59,11 +59,10 @@ type Conn struct {
 
 	negSessions *negSessionMap
 
-	authMu             sync.RWMutex
-	nip42Challenge     string
-	nip42AuthSent      bool // true after ["AUTH", challenge] was enqueued for this connection
-	nip42Pubkeys       map[string]struct{}
-	nip42CurrentPubkey string
+	authMu         sync.RWMutex
+	nip42Challenge string
+	nip42AuthSent  bool // true after ["AUTH", challenge] was enqueued for this connection
+	nip42Pubkeys   map[string]struct{}
 
 	sendMu         sync.Mutex
 	outboundClosed bool

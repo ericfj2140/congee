@@ -88,7 +88,6 @@ func soleGiftWrapRecipient(ev *nostr.Event) (string, bool) {
 }
 
 func nip17ValidXOnlyPubKeyHex(s string) bool {
-	s = strings.TrimSpace(s)
 	if len(s) != 64 {
 		return false
 	}
@@ -98,6 +97,9 @@ func nip17ValidXOnlyPubKeyHex(s string) bool {
 
 // nip17GiftWrapVisibleToSubscription reports whether a NIP-59 gift wrap may be shown on this connection (NIP-17 + NIP-42).
 func nip17GiftWrapVisibleToSubscription(s *Server, connID string, ev *nostr.Event) bool {
+	if !relayNIP42Enabled(s.cfg) {
+		return false
+	}
 	recipient, ok := soleGiftWrapRecipient(ev)
 	if !ok {
 		return false
@@ -107,48 +109,13 @@ func nip17GiftWrapVisibleToSubscription(s *Server, connID string, ev *nostr.Even
 		return false
 	}
 	c := v.(*Conn)
-	return c.nip42CurrentAuthPubkey() == recipient
-}
-
-// validateNIP17REQ rejects query shapes that can reveal gift wraps through a
-// wildcard, mixed-kind filter, or a recipient other than the current AUTH key.
-// It runs before backend access; EventVisibleToSubscription remains the final
-// guard for over-returning stores and live delivery.
-func validateNIP17REQ(cfg *config.Config, c *Conn, filters []nostr.Filter) error {
-	if !nip17Enabled(cfg) {
-		return nil
+	if c.nip42HasPubkey(recipient) {
+		return true
 	}
-	protectedKind := 0
-	for i := range filters {
-		f := &filters[i]
-		if len(f.Kinds) == 0 {
-			return fmt.Errorf("blocked: wildcard subscriptions are not available when private messages are enabled")
-		}
-		for _, kind := range f.Kinds {
-			if isGiftWrapKind(kind) {
-				protectedKind = kind
-			}
+	for _, pubkey := range c.nip42AuthedPubkeys() {
+		if strings.EqualFold(pubkey, recipient) {
+			return true
 		}
 	}
-	if protectedKind == 0 {
-		return nil
-	}
-	for i := range filters {
-		f := &filters[i]
-		if len(f.Kinds) != 1 || f.Kinds[0] != protectedKind {
-			return fmt.Errorf("blocked: gift-wrap subscriptions cannot mix event kinds")
-		}
-		p := f.Tag["#p"]
-		if len(p) != 1 || !nip17ValidXOnlyPubKeyHex(p[0]) || strings.ToLower(p[0]) != p[0] {
-			return fmt.Errorf("blocked: gift-wrap subscriptions require one canonical recipient filter")
-		}
-		current := c.nip42CurrentAuthPubkey()
-		if current == "" {
-			return fmt.Errorf("auth-required: gift-wrap subscriptions require recipient authentication")
-		}
-		if p[0] != current {
-			return fmt.Errorf("restricted: gift-wrap recipient does not match authenticated pubkey")
-		}
-	}
-	return nil
+	return false
 }

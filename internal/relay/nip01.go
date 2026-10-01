@@ -129,15 +129,12 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 	if s.metrics != nil {
 		s.metrics.IncReq()
 	}
-	if err := validateNIP17REQ(s.cfg, c, msg.Filters); err != nil {
-		if strings.HasPrefix(err.Error(), "auth-required:") {
-			_ = nip42EnqueueAuthChallenge(c, s.cfg)
-		}
-		return c.sendClosed(msg.SubID, err.Error())
-	}
-	if subscribeAuthRequired(s.cfg, msg.Filters) && !c.nip42HasAnyAuth() {
+	if readRequiresAuth(s.cfg, c, msg.Filters) {
 		_ = nip42EnqueueAuthChallenge(c, s.cfg)
 		return c.sendClosed(msg.SubID, "auth-required: subscription requires authentication")
+	}
+	if !c.nip42HasAnyAuth() && readMayNeedAuth(s.cfg, msg.Filters) {
+		_ = nip42EnqueueAuthChallenge(c, s.cfg)
 	}
 
 	effective := msg
@@ -154,9 +151,6 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 			subFilters := msg.Filters
 			if len(ires.SubscriptionFilters) > 0 {
 				subFilters = ires.SubscriptionFilters
-			}
-			if err := validateNIP17REQ(s.cfg, c, subFilters); err != nil {
-				return c.sendClosed(msg.SubID, err.Error())
 			}
 			if err := s.subs.Add(c.ID, msg.SubID, subFilters); err != nil {
 				return sendREQAddError(c, msg.SubID, err, log)
@@ -184,11 +178,6 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 			s.subs.NoteSubEOSE(c.ID, msg.SubID)
 			s.subs.FinishSnapshot(c.ID, msg.SubID)
 			return nil
-		}
-	}
-	if effective != msg {
-		if err := validateNIP17REQ(s.cfg, c, effective.Filters); err != nil {
-			return c.sendClosed(msg.SubID, err.Error())
 		}
 	}
 
@@ -221,7 +210,7 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 	}
 	pageSize := config.EffectiveQueryPageSize(s.cfg.ConnectionLimits.QueryPageSize)
 	defaultLimit := config.EffectiveREQDefaultQueryLimit(s.cfg.ConnectionLimits.DefaultQueryLimit)
-	state := newREQQueryState(effective.Filters, defaultLimit, searchEnabled)
+	state := newREQQueryState(queryReadFilters(s.cfg, c, effective.Filters), defaultLimit, searchEnabled)
 
 	t0 := time.Now()
 	events, hasMore, err := fetchREQPage(ctx, s.store, state, pageSize)
@@ -243,8 +232,8 @@ func handleREQ(ctx context.Context, s *Server, c *Conn, msg *nostr.ReqMessage, s
 		})
 		return c.sendClosed(msg.SubID, "internal error")
 	}
-	// NIP-17: REQ is not rejected upfront for filters that might return kind 1059; we query first.
-	// Gift wraps are withheld per connection via EventVisibleToSubscription unless NIP-42 AUTH matches a p tag.
+	// Query visibility is applied before limits; recheck at delivery for over-returning
+	// stores and plugins. Live subscriptions retain the original client filters.
 	for _, ev := range events {
 		if !s.EventVisibleToSubscription(c.ID, ev) {
 			continue
