@@ -6,18 +6,19 @@ import (
 	"testing"
 )
 
-func TestUpstreamSyncFiltersDoNotDiscloseGiftWrapIDs(t *testing.T) {
+func TestUpstreamSyncAcceptsConfiguredRecoveryFilters(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
 		filter  string
 		blocked bool
 	}{
-		{"wildcard", `{}`, true},
-		{"ids only", `{"ids":["` + strings.Repeat("a", 64) + `"]}`, true},
-		{"kind 1059", `{"kinds":[1059]}`, true},
-		{"kind 21059", `{"kinds":[21059]}`, true},
-		{"mixed kinds", `{"kinds":[30402,1059]}`, true},
+		{"wildcard", `{}`, false},
+		{"ids only", `{"ids":["` + strings.Repeat("a", 64) + `"]}`, false},
+		{"kind 1059", `{"kinds":[1059]}`, false},
+		{"kind 21059", `{"kinds":[21059]}`, false},
+		{"mixed kinds", `{"kinds":[30402,1059]}`, false},
+		{"search unsupported", `{"search":"x"}`, true},
 		{"products", `{"kinds":[30402]}`, false},
 		{"merchant metadata", `{"kinds":[0,10002]}`, false},
 	}
